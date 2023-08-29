@@ -37,12 +37,14 @@ if os.path.exists(_camera_env):
     with open(_camera_env, 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), int(info[1]), int(info[2]), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), int(info[1]), int(
+            info[2]), int(info[3]), int(info[4]))
 elif os.path.exists(".env.camera"):
     with open(".env.camera", 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), int(info[1]), int(info[2]), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), int(info[1]), int(
+            info[2]), int(info[3]), int(info[4]))
 
     with open(_camera_env, 'wt') as file:
         file.write(str(CAMERAS[0]) + "," + str(CAMERAS[1]) + "," +
@@ -87,7 +89,7 @@ def global_emit(event, data):
     try:
         with app.test_request_context('/'):
             emit(event, data, broadcast=True, namespace="/")
-        print("emit", data, time.time())
+        print("emit", event, data, time.time())
     except Exception as e:
         print(e)
         pass
@@ -99,7 +101,8 @@ def sync_dir():
         now = datetime.strftime(datetime.now(), "%H:%M")
 
         if now < "23:00":
-            date = datetime.strftime(datetime.utcnow() - timedelta(days=1), "%Y-%m-%d")
+            date = datetime.strftime(
+                datetime.utcnow() - timedelta(days=1), "%Y-%m-%d")
         else:
             date = datetime.strftime(datetime.utcnow(), "%Y-%m-%d")
         sync(mac_add, date)
@@ -141,7 +144,8 @@ def run():
             img = im
             shape = img.shape
             ii = len(calc_ids)
-            results = model(img, conf=0.77, agnostic_nms=True, iou=0.4, verbose=False)
+            results = model(img, conf=0.77, agnostic_nms=True,
+                            iou=0.4, verbose=False)
             detections = []
             if results[0].boxes.shape[0] > 0:
                 for boxx in results[0].boxes:
@@ -159,10 +163,13 @@ def run():
             for track in tracker.tracks:
                 bbox = track.bbox
                 track_id = track.track_id
-                print(track_id, "track_id", track.id, track.confidence)
-                valid_boxes.append((bbox, track.id, track.confidence, track_id))
-            if len(valid_boxes) > 0:
-                valid_boxes.sort(key=lambda c: (c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
+                # print(track_id, "track_id", track.id, track.confidence)
+                valid_boxes.append(
+                    (bbox, track.id, track.confidence, track_id))
+            len_valid_boxes = len(valid_boxes)
+            if len_valid_boxes > 0:
+                valid_boxes.sort(key=lambda c: (
+                    c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
             if detext:
                 if frameCount % 4 != 0:
                     continue
@@ -220,13 +227,13 @@ def run():
                     continue
 
                 boxes = []
-                l =len(valid_boxes)
-                if l > 0:
+
+                if len_valid_boxes > 0:
 
                     flg_append = True
-                    
-                    if l>1:
-                        global_emit("command",l)
+                    print(len_valid_boxes)
+                    if len_valid_boxes > 1:
+                        global_emit("command", len_valid_boxes)
 
                     for box in valid_boxes:
                         idx_class = box[1]
@@ -241,7 +248,8 @@ def run():
 
                         if flg_append:
                             id = _id
-                            sizes.append(max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
+                            sizes.append(
+                                max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
                             calc_ids.append(idx_class)
                             flg_append = False
                 else:
@@ -251,7 +259,8 @@ def run():
                     os.makedirs(_dir)
                 img_path = _dir + "/" + str(mac_add) + "_" + CODE + "_" + datetime.strftime(datetime.utcnow(),
                                                                                             "%Y-%m-%d %X%Z") + "_" + str(frameCount)
-                np.savez_compressed(img_path, image=img, box=np.array(boxes, dtype='float'))
+                np.savez_compressed(img_path, image=img,
+                                    box=np.array(boxes, dtype='float'))
                 images.append(img_path + ".npz")
             elif flag_camera:
                 if frameCount % 3 != 0:
@@ -263,7 +272,8 @@ def run():
                     if _id < 1 or (_id not in caches_ids):
                         final_result += 1
                     if final_result > 4:
-                        global_emit('detect', {'data': True, 'model': str(__path), 'ver': CODE, "id": mac_add})
+                        global_emit('detect', {'data': True, 'model': str(
+                            __path), 'ver': CODE, "id": mac_add})
                         final_result = 0
                         flag_camera = False
                         caches_ids = [_id]
@@ -325,7 +335,8 @@ def index():
 if __name__ == "__main__":
     # run_thread = Thread(target=run)
     # run_thread.start()
-    print("OPEN CAMERA", mac_add, CAMERAS, datetime.strftime(datetime.utcnow(), "%Y-%m-%d %X%Z"))
+    print("OPEN CAMERA", mac_add, CAMERAS, datetime.strftime(
+        datetime.utcnow(), "%Y-%m-%d %X%Z"))
     # th = threading.Thread(target=run, args=())
     # th.setDaemon(True)
     # th.start()
