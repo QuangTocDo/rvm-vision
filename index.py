@@ -84,9 +84,16 @@ def average(lst):
         return 0
     return sum(lst) / len(lst)
 
+emit_times={}
 
 def global_emit(event, data):
+    global emit_times
     try:
+        lastTime = emit_times.get(event,0)
+        if time.time() - lastTime < 0.7:
+            return
+        emit_times[event] = time.time()
+        
         with app.test_request_context('/'):
             emit(event, data, broadcast=True, namespace="/")
         print("emit", event, data, time.time())
