@@ -8,7 +8,7 @@ if str(ROOT) not in sys.path:
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 _model_env = "~/.model.env"
 print(ROOT)
-__weights = ROOT / "alta_weights/aquafina/v17/best.pt"
+__weights = ROOT / "alta_weights/aquafina/v18/best.pt"
 
 def get_model_path():
     local_model = None
