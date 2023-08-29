@@ -144,8 +144,8 @@ def run():
             img = im
             shape = img.shape
             ii = len(calc_ids)
-            results = model(img, conf=0.77, agnostic_nms=True,
-                            iou=0.4, verbose=False)
+            results = model(img, conf=0.75, agnostic_nms=True,
+                            iou=0.81, verbose=False)
             detections = []
             if results[0].boxes.shape[0] > 0:
                 for boxx in results[0].boxes:
@@ -170,6 +170,9 @@ def run():
             if len_valid_boxes > 0:
                 valid_boxes.sort(key=lambda c: (
                     c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
+            elif not detext:
+                global_emit('command', 0)
+            print(len_valid_boxes,"len_valid_boxes")
             if detext:
                 if frameCount % 4 != 0:
                     continue
@@ -231,7 +234,7 @@ def run():
                 if len_valid_boxes > 0:
 
                     flg_append = True
-                    print(len_valid_boxes)
+                    
                     if len_valid_boxes > 1:
                         global_emit("command", len_valid_boxes)
 
@@ -255,6 +258,7 @@ def run():
                 else:
                     boxes.append([np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
                                  frameCount, int(beginTime), endTime - beginTime, 0, -1])
+                    global_emit('command', 0)
                 if not os.path.exists(_dir):
                     os.makedirs(_dir)
                 img_path = _dir + "/" + str(mac_add) + "_" + CODE + "_" + datetime.strftime(datetime.utcnow(),

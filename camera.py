@@ -72,7 +72,7 @@ def open_camera(src):
             img = im[CAMERAS[2]:CAMERAS[4], CAMERAS[1]:CAMERAS[3], :]
             # results=model(img,conf=0.5,agnostic_nms=True, iou=0.4)
             results = model(img, conf=0.75, agnostic_nms=True,
-                            iou=0.8, verbose=False)
+                            iou=0.81, verbose=False)
             valid_boxes = []
             detections = []
             if results[0].boxes.shape[0] > 0:
