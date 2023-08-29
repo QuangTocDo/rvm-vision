@@ -114,4 +114,5 @@ def open_camera(src):
 
 
 if __name__ == "__main__":
+    print(CAMERAS)
     open_camera(0)
