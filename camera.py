@@ -20,7 +20,7 @@ _camera_env = HOME/".camera.env"
 _camera_env_old = ROOT / ".env.camera"
 
 # tracker = ROOT / "botsort.yaml"
-CAMERAS = (0, 0, 0, 640, 480)
+CAMERAS = (0, 10, 10, 640, 480)
 print(_camera_env)
 if os.path.exists(_camera_env):
     with open(_camera_env, 'rt') as file:
@@ -92,7 +92,7 @@ def open_camera(src):
                 print(track_id, "track_id", track.id)
                 valid_boxes.append(
                     (bbox, track.id, track.confidence, track_id))
-            cv2.rectangle(img, (CAMERAS[1], CAMERAS[3]), (CAMERAS[2],
+            cv2.rectangle(img, (CAMERAS[1], CAMERAS[2]), (CAMERAS[3],
                           CAMERAS[4]), (255, 255, 255), 2, cv2.LINE_AA)
             for box in valid_boxes:
                 idx_class = box[1]
