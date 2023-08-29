@@ -69,7 +69,7 @@ def open_camera(src):
                     info[2]), int(info[3]), int(info[4]))
                 cv2.destroyAllWindows()
         if ret:
-            img = im[CAMERAS[2]:CAMERAS[4], CAMERAS[1]:CAMERAS[3], :]
+            img = im
             # results=model(img,conf=0.5,agnostic_nms=True, iou=0.4)
             results = model(img, conf=0.75, agnostic_nms=True,
                             iou=0.81, verbose=False)
@@ -94,7 +94,8 @@ def open_camera(src):
                 print(track_id, "track_id", track.id)
                 valid_boxes.append(
                     (bbox, track.id, track.confidence, track_id))
-
+            cv2.rectangle(img, (CAMERAS[1], CAMERAS[3]), (CAMERAS[2],
+                          CAMERAS[4]), (255, 255, 255), 2, cv2.LINE_AA)
             for box in valid_boxes:
                 idx_class = box[1]
                 x1, y1, x2, y2 = box[0]

@@ -20,7 +20,7 @@ mac_add = "rvm"
 __env = HOME / ".env"
 _camera_env = HOME / ".camera.env"
 CODE = "7.0.0"
-CAMERAS = (0, 0, 0, 640, 480)
+CAMERAS = (0, 10, 10, 630, 470)
 
 
 if os.path.exists(__env):
@@ -37,14 +37,12 @@ if os.path.exists(_camera_env):
     with open(_camera_env, 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), int(info[1]), int(
-            info[2]), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]),10), max(int(info[2]),10), int(info[3]), int(info[4]))
 elif os.path.exists(".env.camera"):
     with open(".env.camera", 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), int(info[1]), int(
-            info[2]), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]),10), max(int(info[2]),10), int(info[3]), int(info[4]))
 
     with open(_camera_env, 'wt') as file:
         file.write(str(CAMERAS[0]) + "," + str(CAMERAS[1]) + "," +
@@ -84,16 +82,18 @@ def average(lst):
         return 0
     return sum(lst) / len(lst)
 
-emit_times={}
+
+emit_times = {}
+
 
 def global_emit(event, data):
     global emit_times
     try:
-        lastTime = emit_times.get(event,0)
+        lastTime = emit_times.get(event, 0)
         if time.time() - lastTime < 0.7:
             return
         emit_times[event] = time.time()
-        
+
         with app.test_request_context('/'):
             emit(event, data, broadcast=True, namespace="/")
         print("emit", event, data, time.time())
@@ -179,10 +179,13 @@ def run():
                     c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
             elif not detext:
                 global_emit('command', 0)
-            print(len_valid_boxes,"len_valid_boxes")
+            if frameCount % 4 != 0:
+                print(len_valid_boxes, "len_valid_boxes")
+            
             if detext:
                 if frameCount % 4 != 0:
                     continue
+                
                 endTime = time.time()
 
                 if ii >= 3:
@@ -203,10 +206,9 @@ def run():
                     sizes = []
                     flag_camera = False
                     id = -1
-
                     continue
 
-                if endTime - beginTime > 2:
+                if endTime - beginTime > 2.5:
                     detext = False
                     final_result = 0
                     if ii > 0:
@@ -241,7 +243,7 @@ def run():
                 if len_valid_boxes > 0:
 
                     flg_append = True
-                    
+
                     if len_valid_boxes > 1:
                         global_emit("command", len_valid_boxes)
 
@@ -255,6 +257,15 @@ def run():
 
                         boxes.append([x1, y1, x2, y2, conf, idx_class, frameCount,
                                      beginTime, endTime - beginTime, len(valid_boxes), _id])
+
+                        if x1 < CAMERAS[1]:
+                            continue
+                        if y1 < CAMERAS[2]:
+                            continue
+                        if x2 > CAMERAS[3]:
+                            continue
+                        if y2 > CAMERAS[4]:
+                            continue
 
                         if flg_append:
                             id = _id
