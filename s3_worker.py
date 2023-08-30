@@ -144,7 +144,7 @@ def sync_dir(path, S3_FOLDER_NAME):
             # socketio.sleep(0.05)
             print("sync_dir", full_path)
     except Exception as ex:
-        print("sync_dir", ex)
+        print("SC Exception", ex)
         pass
 
 
