@@ -46,9 +46,10 @@ client = boto3.resource("s3",
                         aws_session_token=None)
 
 
-def s3_dirs(path: str, bucket:str = None):
+def s3_dirs(path: str, bucket: str = None):
     try:
-        objects = client.Bucket(bucket if bucket is not None else S3_BUCKET_NAME).objects.all()
+        objects = client.Bucket(
+            bucket if bucket is not None else S3_BUCKET_NAME).objects.all()
         all = []
         for obj in objects.filter(Prefix=path):
             object_name = obj.key
@@ -69,7 +70,7 @@ def get_all():
         return []
 
 
-def create_presigned_url(bucket_key, expiration=3600, Bucket = None):
+def create_presigned_url(bucket_key, expiration=3600, Bucket=None):
     return s3.generate_presigned_url('get_object',
                                      Params={'Bucket': Bucket if Bucket is not None else S3_BUCKET_NAME,
                                              'Key': bucket_key},
@@ -77,7 +78,8 @@ def create_presigned_url(bucket_key, expiration=3600, Bucket = None):
 
 
 def random():
-    __mac = str(hex(zlib.crc32(bytes(str(get_mac()), 'ascii'))).replace("0x", "r-"))
+    __mac = str(
+        hex(zlib.crc32(bytes(str(get_mac()), 'ascii'))).replace("0x", "r-"))
     return __mac
 
 
@@ -96,12 +98,15 @@ def unix():
 def move_s3_object(src, dest) -> None:
     old_bucket = src['Bucket'] if 'Bucket' in src else S3_BUCKET_NAME
     old_key = src['Key']
-    client.Bucket(dest['Bucket'] if 'Bucket' in dest else S3_BUCKET_NAME).copy({'Bucket': old_bucket, 'Key': old_key}, dest['Key'] if 'Key' in dest else old_key)
+    client.Bucket(dest['Bucket'] if 'Bucket' in dest else S3_BUCKET_NAME).copy(
+        {'Bucket': old_bucket, 'Key': old_key}, dest['Key'] if 'Key' in dest else old_key)
     s3.delete_object(Bucket=old_bucket, Key=old_key)
 
 
-def delete_object(Key: str, bucket:str=None):
-    s3.delete_object(Bucket=bucket if bucket is not None else S3_BUCKET_NAME, Key=Key)
+def delete_object(Key: str, bucket: str = None):
+    s3.delete_object(
+        Bucket=bucket if bucket is not None else S3_BUCKET_NAME, Key=Key)
+
 
 def getDirs(root_dir, regex=".*\.npz"):
     # files = glob.glob(regex,root_dir=root_dir,recursive=True)
@@ -114,8 +119,11 @@ def getDirs(root_dir, regex=".*\.npz"):
             file_list.append(file)
     return file_list
 
-def upload_file(path:str, key: str=None, bucket:str =None):
-    s3.upload_file(path, bucket if bucket is not None else S3_BUCKET_NAME, key if key is not None else path)
+
+def upload_file(path: str, key: str = None, bucket: str = None):
+    s3.upload_file(path, bucket if bucket is not None else S3_BUCKET_NAME,
+                   key if key is not None else path)
+
 
 def sync_dir(path, S3_FOLDER_NAME):
     files = getDirs(path)
@@ -128,10 +136,11 @@ def sync_dir(path, S3_FOLDER_NAME):
         for file in files:
             full_path = path + "/" + file
             s3_file = f"{S3_FOLDER_NAME}/{file}"
-            upload_file(full_path, s3_file)
+            s3.upload_file(path, S3_BUCKET_NAME, s3_file)
+            # upload_file(full_path, s3_file)
             # socketio.sleep(0.05)
             os.unlink(full_path)
-            time.sleep(0.01)
+            # time.sleep(0.01)
             # socketio.sleep(0.05)
             print("sync_dir", full_path)
     except Exception as ex:
@@ -159,7 +168,8 @@ def sync(S3_FOLDER_NAME, date):
     print("SYNC BEGIN", S3_FOLDER_NAME, date, root_dirs)
     for d in root_dirs:
         if d <= date:
-            th = Thread(target=sync_dir, args=(f"{DATA_FILES_LOCATION}{d}", f"{S3_FOLDER_NAME}/{d}"))
+            th = Thread(target=sync_dir, args=(
+                f"{DATA_FILES_LOCATION}{d}", f"{S3_FOLDER_NAME}/{d}"))
             th.daemon = True
             th.start()
             # socketio.sleep(0.05)
