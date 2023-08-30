@@ -10,3 +10,4 @@ gevent-websocket
 eventlet
 tqdm
 supervision[desktop]
+yaml

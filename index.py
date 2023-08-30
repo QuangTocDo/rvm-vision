@@ -37,12 +37,14 @@ if os.path.exists(_camera_env):
     with open(_camera_env, 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), max(int(info[1]),10), max(int(info[2]),10), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]), 10), max(
+            int(info[2]), 10), int(info[3]), int(info[4]))
 elif os.path.exists(".env.camera"):
     with open(".env.camera", 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), max(int(info[1]),10), max(int(info[2]),10), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]), 10), max(
+            int(info[2]), 10), int(info[3]), int(info[4]))
 
     with open(_camera_env, 'wt') as file:
         file.write(str(CAMERAS[0]) + "," + str(CAMERAS[1]) + "," +
@@ -181,11 +183,11 @@ def run():
                 global_emit('command', 0)
             if frameCount % 4 != 0:
                 print(len_valid_boxes, "len_valid_boxes")
-            
+
             if detext:
                 if frameCount % 4 != 0:
                     continue
-                
+
                 endTime = time.time()
 
                 if ii >= 3:
