@@ -19,7 +19,7 @@ HOME = Path.home()
 mac_add = "rvm"
 __env = HOME / ".env"
 _camera_env = HOME / ".camera.env"
-CODE = "7.0.0"
+CODE = "8.0.0"
 CAMERAS = (0, 10, 10, 630, 470)
 
 
@@ -151,7 +151,7 @@ def run():
             img = im
             shape = img.shape
             ii = len(calc_ids)
-            results = model(img, conf=0.75, agnostic_nms=True,
+            results = model(img, conf=0.7, agnostic_nms=True,
                             iou=0.81, verbose=False)
             detections = []
             if results[0].boxes.shape[0] > 0:
@@ -193,7 +193,7 @@ def run():
                     avg = (sum(calc_ids) * 1.0) / len(calc_ids)
                     calc_ids = []
 
-                    if avg < 0.55:
+                    if avg < 0.5:
                         flg = 0
                     elif avg < 1.5:
                         flg = 1
@@ -220,7 +220,7 @@ def run():
 
                     if avg < 0:
                         flg = -1
-                    elif avg < 0.55:
+                    elif avg < 0.5:
                         flg = 0
                     elif avg < 1.5:
                         flg = 1
@@ -271,7 +271,8 @@ def run():
                             id = _id
                             sizes.append(
                                 max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
-                            calc_ids.append(idx_class)
+                            calc_id = idx_class if idx_class < 3 else 2
+                            calc_ids.append(calc_id)
                             flg_append = False
                 else:
                     boxes.append([np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
