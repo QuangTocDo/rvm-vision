@@ -131,12 +131,12 @@ def sync_dir(path, S3_FOLDER_NAME):
         print("CLEAN", S3_FOLDER_NAME)
         shutil.rmtree(path, True)
         return
-    print("sync_dir", len(files))
+    print("sync_dir", len(files), path)
     try:
         for file in files:
             full_path = path + "/" + file
             s3_file = f"{S3_FOLDER_NAME}/{file}"
-            s3.upload_file(path, S3_BUCKET_NAME, s3_file)
+            s3.upload_file(full_path, S3_BUCKET_NAME, s3_file)
             # upload_file(full_path, s3_file)
             # socketio.sleep(0.05)
             os.unlink(full_path)
@@ -144,6 +144,7 @@ def sync_dir(path, S3_FOLDER_NAME):
             # socketio.sleep(0.05)
             print("sync_dir", full_path)
     except Exception as ex:
+        print("sync_dir", ex)
         pass
 
 
