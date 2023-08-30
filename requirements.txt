@@ -9,5 +9,5 @@ flask-cors
 gevent-websocket
 eventlet
 tqdm
-supervision[desktop]
+# supervision[desktop]
 yaml

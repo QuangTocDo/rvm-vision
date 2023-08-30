@@ -164,6 +164,10 @@ def run():
                     y1 = int(a[0, 1])
                     x2 = int(a[0, 2])
                     y2 = int(a[0, 3])
+                    if x1 < CAMERAS[1]:
+                        continue
+                    if y1 < CAMERAS[2]:
+                        continue
                     score = float(boxx.conf.cpu().detach().numpy())
                     idx_class = int(boxx.cls.cpu().detach().numpy())
                     detections.append([x1, y1, x2, y2, idx_class, score])
@@ -260,10 +264,7 @@ def run():
                         boxes.append([x1, y1, x2, y2, conf, idx_class, frameCount,
                                      beginTime, endTime - beginTime, len(valid_boxes), _id])
 
-                        if x1 < CAMERAS[1]:
-                            continue
-                        if y1 < CAMERAS[2]:
-                            continue
+                        
                         if x2 > CAMERAS[3]:
                             continue
                         if y2 > CAMERAS[4]:
