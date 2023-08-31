@@ -214,7 +214,7 @@ def run():
                     id = -1
                     continue
 
-                if endTime - beginTime > 3.6:
+                if endTime - beginTime > 2.6:
                     detext = False
                     final_result = 0
                     if ii > 0:
