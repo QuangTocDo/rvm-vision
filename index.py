@@ -12,7 +12,7 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 from s3_worker import unix, sync
 from config import get_model_path
-import supervision as sv
+# import supervision as sv
 
 from tracker import Tracker
 HOME = Path.home()
