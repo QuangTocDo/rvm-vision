@@ -19,7 +19,7 @@ HOME = Path.home()
 mac_add = "rvm"
 __env = HOME / ".env"
 _camera_env = HOME / ".camera.env"
-CODE = "8.0.0"
+CODE = "8.1.0"
 CAMERAS = (0, 10, 10, 630, 470)
 
 
@@ -189,7 +189,7 @@ def run():
                 print(len_valid_boxes, "len_valid_boxes")
 
             if detext:
-                if frameCount % 4 != 0:
+                if frameCount % 4 != 0 or frameCount< 21:
                     continue
 
                 endTime = time.time()
@@ -214,7 +214,7 @@ def run():
                     id = -1
                     continue
 
-                if endTime - beginTime > 2.5:
+                if endTime - beginTime > 3.6:
                     detext = False
                     final_result = 0
                     if ii > 0:
@@ -303,6 +303,7 @@ def run():
                         final_result = 0
                         flag_camera = False
                         caches_ids = [_id]
+                        frameCount=0
                         # if _id > 0:
                         #     camera_ids.append(_id)
                     pass
