@@ -181,11 +181,13 @@ def run():
                     (bbox, track.id, track.confidence, track_id))
             len_valid_boxes = len(valid_boxes)
             if len_valid_boxes > 0:
+                if len_valid_boxes > 1 and detext:
+                    global_emit('command', 2)
                 valid_boxes.sort(key=lambda c: (
                     c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
-            elif not detext:
+            else:
                 global_emit('command', 0)
-            if frameCount % 4 != 0:
+            if frameCount % 40 != 0:
                 print(len_valid_boxes, "len_valid_boxes")
 
             if detext:
@@ -250,8 +252,8 @@ def run():
 
                     flg_append = True
 
-                    if len_valid_boxes > 1:
-                        global_emit("command", len_valid_boxes)
+                    # if len_valid_boxes > 1:
+                    #     global_emit("command", len_valid_boxes)
 
                     for box in valid_boxes:
                         idx_class = box[1]
