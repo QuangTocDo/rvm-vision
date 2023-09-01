@@ -187,8 +187,7 @@ def run():
                     c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
             else:
                 global_emit('command', 0)
-            if frameCount % 40 != 0:
-                print(len_valid_boxes, "len_valid_boxes")
+            
 
             if detext:
                 if frameCount % 4 != 0 or frameCount< 21:
