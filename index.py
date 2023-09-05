@@ -128,7 +128,8 @@ def transform_id(id_detect):
     global __dict
     if __dict is None:
         return id_detect
-    return __dict.get(id_detect, id_detect)
+     #idx_class if idx_class < 3 else 2
+    return __dict.get(str(id_detect), id_detect)
 
 def calc_avg(calc_ids):
     if calc_ids is None:
@@ -348,7 +349,7 @@ def run_detect(data):
     print(data, "data", time.time() - beginTime, time.time())
     if "transform" in data:
         __dict=data["transform"]
-        print(__dict)
+        print(__dict, transform_id(4))
     
     if "detext" in data:
         if not detext:
