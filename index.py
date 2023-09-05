@@ -19,7 +19,7 @@ HOME = Path.home()
 mac_add = "rvm"
 __env = HOME / ".env"
 _camera_env = HOME / ".camera.env"
-CODE = "8.1.0"
+CODE = "8.2.0"
 CAMERAS = (0, 10, 10, 630, 470)
 
 
