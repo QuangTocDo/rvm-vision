@@ -92,7 +92,7 @@ def global_emit(event, data):
     global emit_times
     try:
         lastTime = emit_times.get(event, 0)
-        if time.time() - lastTime < 0.7:
+        if time.time() - lastTime < 0.5:
             return
         emit_times[event] = time.time()
 
@@ -123,6 +123,24 @@ def sync_dir():
             socketio.sleep(_delta_seconds.seconds)
         else:
             socketio.sleep(seconds)
+__dict={0:0, 1:1, 2:2, 3:2, 4:2}
+def transform_id(id_detect):
+    global __dict
+    return __dict.get(id_detect, id_detect)
+
+def calc_avg(calc_ids):
+    if calc_ids is None:
+        return -1
+    if len(calc_ids) ==0:
+        return -1
+    avg = (sum(calc_ids) * 1.0) / len(calc_ids)
+    if avg < 0:
+        return -1
+    if avg < 0.5:
+        return 0
+    if avg < 1.5:
+        return 1
+    return 2
 
 
 def run():
@@ -197,20 +215,13 @@ def run():
 
                 if ii >= 3:
                     detext = False
-                    avg = (sum(calc_ids) * 1.0) / len(calc_ids)
-                    calc_ids = []
-
-                    if avg < 0.5:
-                        flg = 0
-                    elif avg < 1.5:
-                        flg = 1
-                    else:
-                        flg = 2
+                    
                     final_result = 0
-                    global_emit('result', {'data': flg, 'model': str(__path), 'ver': CODE,
+                    global_emit('result', {'data': calc_avg(calc_ids), 'model': str(__path), 'ver': CODE,
                                 "id": mac_add, "images": images, "size": average(sizes), "item": id})
                     images = []
                     sizes = []
+                    calc_ids = []
                     flag_camera = False
                     id = -1
                     continue
@@ -219,25 +230,16 @@ def run():
                     detext = False
                     final_result = 0
                     if ii > 0:
-                        avg = (sum(calc_ids) * 1.0) / len(calc_ids)
+                        avg = calc_avg(calc_ids)
                     else:
                         avg = -1
 
                     calc_ids = []
 
-                    if avg < 0:
-                        flg = -1
-                    elif avg < 0.5:
-                        flg = 0
-                    elif avg < 1.5:
-                        flg = 1
-                    else:
-                        flg = 2
-
                     if id > 0:
                         caches_ids.append(id)
 
-                    global_emit('result', {'data': flg, 'model': str(__path), 'ver': CODE,
+                    global_emit('result', {'data': avg, 'model': str(__path), 'ver': CODE,
                                 "id": mac_add, "images": images, "size": average(sizes), "item": id})
                     flag_camera = False
                     images = []
@@ -275,8 +277,9 @@ def run():
                             id = _id
                             sizes.append(
                                 max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
-                            calc_id = idx_class if idx_class < 3 else 2
-                            calc_ids.append(calc_id)
+                            #
+                            #calc_id = idx_class if idx_class < 3 else 2
+                            calc_ids.append(transform_id(idx_class))
                             flg_append = False
                 else:
                     boxes.append([np.nan, np.nan, np.nan, np.nan, np.nan, np.nan,
@@ -339,8 +342,12 @@ def my_event(message):
 
 @socketio.event
 def run_detect(data):
-    global detext, beginTime, flag_camera
+    global detext, beginTime, flag_camera, __dict
     print(data, "data", time.time() - beginTime, time.time())
+    if "transform" in data:
+        __dict=data["transform"]
+        print(__dict)
+    
     if "detext" in data:
         if not detext:
             beginTime = time.time()
@@ -348,6 +355,8 @@ def run_detect(data):
         # print(data, begin_frame, detext)
     if "camera" in data:
         flag_camera = data["camera"]
+    
+    
 
 
 @app.route('/camera')
