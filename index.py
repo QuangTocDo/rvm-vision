@@ -126,6 +126,8 @@ def sync_dir():
 __dict={0:0, 1:1, 2:2, 3:2, 4:2}
 def transform_id(id_detect):
     global __dict
+    if __dict is None:
+        return id_detect
     return __dict.get(id_detect, id_detect)
 
 def calc_avg(calc_ids):
