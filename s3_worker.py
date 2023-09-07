@@ -18,7 +18,7 @@ S3_access_key_id = 'rvm-publish'
 S3_secret_access_key = "&Dfhcj$vRVbaUU2c"
 CACHES = []
 DATA_FILES_LOCATION = "./temp/"
-config = boto3.Config(connect_timeout=5, signature_version='s3v4' , retries={'max_attempts': 5})
+config = boto3.session.Config(connect_timeout=5, signature_version='s3v4' , retries={'max_attempts': 5})
 
 # rvm-publish/&Dfhcj$vRVbaUU2c
 
