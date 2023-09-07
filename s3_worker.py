@@ -18,13 +18,13 @@ S3_access_key_id = 'rvm-publish'
 S3_secret_access_key = "&Dfhcj$vRVbaUU2c"
 CACHES = []
 DATA_FILES_LOCATION = "./temp/"
-
+config = boto3.Config(connect_timeout=5, signature_version='s3v4' , retries={'max_attempts': 5})
 
 # rvm-publish/&Dfhcj$vRVbaUU2c
 
 s3 = boto3.client('s3',
                   endpoint_url=S3_ENDPOINT,
-                  config=boto3.session.Config(signature_version='s3v4'),
+                  config=config,
                   aws_access_key_id=S3_access_key_id,
                   aws_secret_access_key=S3_secret_access_key,
                   aws_session_token=None
@@ -40,7 +40,7 @@ except Exception as ex:
 
 client = boto3.resource("s3",
                         endpoint_url=S3_ENDPOINT,
-                        config=boto3.session.Config(signature_version='s3v4'),
+                        config=config,
                         aws_access_key_id=S3_access_key_id,
                         aws_secret_access_key=S3_secret_access_key,
                         aws_session_token=None)

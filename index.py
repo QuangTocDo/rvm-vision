@@ -107,6 +107,7 @@ def global_emit(event, data):
 def sync_dir():
     seconds = 24 * 60 * 60
     while True:
+        socketio.sleep(3)
         now = datetime.strftime(datetime.now(), "%H:%M")
 
         if now < "23:00":
