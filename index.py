@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 import numpy as np
 from datetime import datetime, timedelta, timezone
-from s3_worker import unix, sync
+from s3_worker import unix, sync, init
 from config import get_model_path
 # import supervision as sv
 
@@ -19,8 +19,8 @@ HOME = Path.home()
 mac_add = "rvm"
 __env = HOME / ".env"
 _camera_env = HOME / ".camera.env"
-CODE = "8.2.0"
-CAMERAS = (0, 10, 10, 630, 470)
+CODE = "8.4.0"
+CAMERAS = (0, 0, 0, 640, 480)
 
 
 if os.path.exists(__env):
@@ -37,14 +37,13 @@ if os.path.exists(_camera_env):
     with open(_camera_env, 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), max(int(info[1]), 10), max(
-            int(info[2]), 10), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]), 0), max(int(info[2]), 0), int(info[3]), int(info[4]))
+    
 elif os.path.exists(".env.camera"):
     with open(".env.camera", 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), max(int(info[1]), 10), max(
-            int(info[2]), 10), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]), 0), max(int(info[2]), 0), int(info[3]), int(info[4]))
 
     with open(_camera_env, 'wt') as file:
         file.write(str(CAMERAS[0]) + "," + str(CAMERAS[1]) + "," +
@@ -56,6 +55,7 @@ else:
                    str(CAMERAS[2]) + "," + str(CAMERAS[3]) + "," + str(CAMERAS[4]))
 
 if not mac_add.startswith("r-"):
+    init()
     mac_add = unix()
     with open(__env, 'wt') as file:
         file.write(mac_add)
@@ -108,29 +108,32 @@ def sync_dir():
     seconds = 24 * 60 * 60
     while True:
         socketio.sleep(3)
+        init()
+        socketio.sleep(30)
         now = datetime.strftime(datetime.now(), "%H:%M")
 
         if now < "23:00":
-            date = datetime.strftime(
-                datetime.utcnow() - timedelta(days=1), "%Y-%m-%d")
+            date = datetime.strftime(datetime.utcnow() - timedelta(days=1), "%Y-%m-%d")
         else:
             date = datetime.strftime(datetime.utcnow(), "%Y-%m-%d")
+        
         sync(mac_add, date)
 
         if now < "23:00":
             __date = datetime.now()
-            _delta_seconds = datetime(year=__date.year, month=__date.month,
-                                      day=__date.day, hour=23, minute=1, second=0) - __date
+            _delta_seconds = datetime(year=__date.year, month=__date.month, day=__date.day, hour=23, minute=1, second=0) - __date
             socketio.sleep(_delta_seconds.seconds)
         else:
             socketio.sleep(seconds)
 __dict={0:0, 1:1, 2:2, 3:2, 4:2}
+
 def transform_id(id_detect):
     global __dict
     if __dict is None:
         return id_detect
      #idx_class if idx_class < 3 else 2
     return __dict.get(str(id_detect), id_detect)
+
 
 def calc_avg(calc_ids):
     if calc_ids is None:

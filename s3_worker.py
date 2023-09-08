@@ -8,6 +8,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from threading import Thread
+import json
 
 import cv2
 
@@ -18,11 +19,16 @@ S3_access_key_id = 'rvm-publish'
 S3_secret_access_key = "&Dfhcj$vRVbaUU2c"
 CACHES = []
 DATA_FILES_LOCATION = "./temp/"
+
 config = boto3.session.Config(connect_timeout=5, signature_version='s3v4' , retries={'max_attempts': 5})
 
-# rvm-publish/&Dfhcj$vRVbaUU2c
 
-s3 = boto3.client('s3',
+s3 = None
+client = None
+
+def init():
+    global s3,client
+    s3 = boto3.client('s3',
                   endpoint_url=S3_ENDPOINT,
                   config=config,
                   aws_access_key_id=S3_access_key_id,
@@ -30,15 +36,14 @@ s3 = boto3.client('s3',
                   aws_session_token=None
                   )
 
-try:
-    result = s3.get_bucket_acl(Bucket=S3_BUCKET_NAME)
-except Exception as ex:
     try:
-        s3.create_bucket(Bucket=S3_BUCKET_NAME)
-    except Exception as ex2:
-        print(ex2)
-
-client = boto3.resource("s3",
+        result = s3.get_bucket_acl(Bucket=S3_BUCKET_NAME)
+    except Exception as ex:
+        try:
+            s3.create_bucket(Bucket=S3_BUCKET_NAME)
+        except Exception as ex2:
+            print(ex2)
+    client = boto3.resource("s3",
                         endpoint_url=S3_ENDPOINT,
                         config=config,
                         aws_access_key_id=S3_access_key_id,
@@ -60,6 +65,8 @@ def s3_dirs(path: str, bucket: str = None):
 
 
 def get_all():
+    if s3 is None:
+        return []
     try:
         all = []
         resp = s3.list_objects(Bucket=S3_BUCKET_NAME, Prefix="", Delimiter='/')
@@ -83,6 +90,9 @@ def random():
     return __mac
 
 
+def put_object(body, key, bucket=None, type="text"):
+    s3.put_object(Body=body, Bucket=bucket if bucket is not None else S3_BUCKET_NAME, Key=key, ContentType=type)
+
 def unix():
     ignores = get_all()
     mac = random()
@@ -90,6 +100,7 @@ def unix():
         mac = random()
     try:
         s3.put_object(Bucket=S3_BUCKET_NAME, Key=str(mac) + "/")
+        put_object(json.dumps({"amount":0, "begin_date": datetime.strftime(datetime.utcnow(), "%Y-%m-%d")}), str(mac)  + "/summary.json")
     except Exception as ex:
         print(ex)
     return mac
@@ -130,6 +141,8 @@ def sync_dir(path, S3_FOLDER_NAME):
     if files == None or len(files) == 0:
         print("CLEAN", S3_FOLDER_NAME)
         shutil.rmtree(path, True)
+        return
+    if s3 is None:
         return
     print("sync_dir", len(files), path)
     try:
