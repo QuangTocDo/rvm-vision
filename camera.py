@@ -26,13 +26,13 @@ if os.path.exists(_camera_env):
     with open(_camera_env, 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), max(int(info[1]),10), max(int(info[2]),10), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]),0), max(int(info[2]),0), int(info[3]), int(info[4]))
 
 elif os.path.exists(_camera_env_old):
     with open(_camera_env_old, 'rt') as file:
         size = file.readline()
         info = size.split(",")
-        CAMERAS = (int(info[0]), max(int(info[1]),10), max(int(info[2]),10), int(info[3]), int(info[4]))
+        CAMERAS = (int(info[0]), max(int(info[1]),0), max(int(info[2]),0), int(info[3]), int(info[4]))
 
     with open(_camera_env, 'wt') as file:
         file.write(str(CAMERAS[0]) + "," + str(CAMERAS[1]) + "," +

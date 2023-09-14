@@ -178,8 +178,7 @@ def run():
             img = im
             shape = img.shape
             ii = len(calc_ids)
-            results = model(img, conf=0.7, agnostic_nms=True,
-                            iou=0.81, verbose=False)
+            results = model(img, conf=0.7, agnostic_nms=True, iou=0.81, verbose=False)
             detections = []
             if results[0].boxes.shape[0] > 0:
                 for boxx in results[0].boxes:
@@ -202,20 +201,18 @@ def run():
                 bbox = track.bbox
                 track_id = track.track_id
                 # print(track_id, "track_id", track.id, track.confidence)
-                valid_boxes.append(
-                    (bbox, track.id, track.confidence, track_id))
+                valid_boxes.append((bbox, track.id, track.confidence, track_id))
             len_valid_boxes = len(valid_boxes)
             if len_valid_boxes > 0:
                 if len_valid_boxes > 1 and detext:
                     global_emit('command', 2)
-                valid_boxes.sort(key=lambda c: (
-                    c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
+                valid_boxes.sort(key=lambda c: (c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
             else:
                 global_emit('command', 0)
             
 
             if detext:
-                if frameCount % 4 != 0 or frameCount< 21:
+                if frameCount % 4 != 0 or frameCount< 13:
                     continue
 
                 endTime = time.time()
