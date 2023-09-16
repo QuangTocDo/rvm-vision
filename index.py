@@ -92,12 +92,13 @@ def global_emit(event, data):
     global emit_times
     try:
         lastTime = emit_times.get(event, 0)
-        if time.time() - lastTime < 0.5:
+        if time.time() - lastTime < 0.5 and event!="result":
             return
         emit_times[event] = time.time()
 
         with app.test_request_context('/'):
             emit(event, data, broadcast=True, namespace="/")
+        
         print("emit", event, data, time.time())
     except Exception as e:
         print(e)
@@ -167,10 +168,7 @@ def run():
     images = []
     sizes = []
     tracker = Tracker()
-    # W, H = CAMERAS[3] - CAMERAS[1], CAMERAS[4] - CAMERAS[2]
-    # rw = 640.0 / W
-    # rh = 480.0 / H
-    # r = min(rw, rh)
+    
     while True:
         ret, im = camera.read()
         frameCount += 1
@@ -192,6 +190,7 @@ def run():
                         continue
                     if y1 < CAMERAS[2]:
                         continue
+                    
                     score = float(boxx.conf.cpu().detach().numpy())
                     idx_class = int(boxx.cls.cpu().detach().numpy())
                     detections.append([x1, y1, x2, y2, idx_class, score])
@@ -212,7 +211,7 @@ def run():
             
 
             if detext:
-                if frameCount % 4 != 0 or frameCount< 13:
+                if frameCount % 4 != 0 or frameCount< 4:
                     continue
 
                 endTime = time.time()
