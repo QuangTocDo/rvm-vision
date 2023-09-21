@@ -113,14 +113,14 @@ def sync_dir():
         socketio.sleep(30)
         now = datetime.strftime(datetime.now(), "%H:%M")
 
-        if now < "23:00":
+        if now < "20:00":
             date = datetime.strftime(datetime.utcnow() - timedelta(days=1), "%Y-%m-%d")
         else:
             date = datetime.strftime(datetime.utcnow(), "%Y-%m-%d")
         
         sync(mac_add, date)
 
-        if now < "23:00":
+        if now < "20:00":
             __date = datetime.now()
             _delta_seconds = datetime(year=__date.year, month=__date.month, day=__date.day, hour=23, minute=1, second=0) - __date
             socketio.sleep(_delta_seconds.seconds)
