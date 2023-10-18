@@ -136,7 +136,7 @@ def sync_dir():
 
         if now < "20:00":
             __date = datetime.now()
-            _delta_seconds = datetime(year=__date.year, month=__date.month, day=__date.day, hour=23, minute=1, second=0) - __date
+            _delta_seconds = datetime(year=__date.year, month=__date.month, day=__date.day, hour=20, minute=1, second=0) - __date
             socketio.sleep(_delta_seconds.seconds)
         else:
             socketio.sleep(seconds)
