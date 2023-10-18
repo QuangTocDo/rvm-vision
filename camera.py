@@ -20,7 +20,7 @@ _camera_env = HOME/".camera.env"
 _camera_env_old = ROOT / ".env.camera"
 
 # tracker = ROOT / "botsort.yaml"
-CAMERAS = (0, 10, 10, 640, 480)
+CAMERAS = (-1, 10, 10, 640, 480)
 print(_camera_env)
 if os.path.exists(_camera_env):
     with open(_camera_env, 'rt') as file:
@@ -112,7 +112,27 @@ def open_camera(src):
     cv2.destroyAllWindows()
     camera.release()
 
+def FindCamera():
+    # checks the first 10 indexes.
+    index = 0
+    arr = []
+    i = 10
+    while i > 0:
+        cap = cv2.VideoCapture(index)
+        if cap.read()[0]:
+            arr.append(index)
+            cap.release()
+        index += 1
+        i -= 1
+    return arr
 
 if __name__ == "__main__":
     print(CAMERAS)
-    open_camera(0)
+    index = CAMERAS[0]
+    if index <0:
+        cameras = FindCamera()
+        if len(cameras) ==0:
+            print("can not open camera")
+        print(cameras)
+        index = cameras[0]
+    open_camera(index)

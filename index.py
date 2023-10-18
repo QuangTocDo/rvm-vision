@@ -20,7 +20,7 @@ mac_add = "rvm"
 __env = HOME / ".env"
 _camera_env = HOME / ".camera.env"
 CODE = "8.4.0"
-CAMERAS = (0, 0, 0, 640, 480)
+CAMERAS = (-1, 0, 0, 640, 480)
 
 
 if os.path.exists(__env):
@@ -78,6 +78,20 @@ if not os.path.exists(_dir):
 detext = False
 flag_camera = False
 
+
+def FindCamera():
+    # checks the first 10 indexes.
+    index = 0
+    arr = []
+    i = 10
+    while i > 0:
+        cap = cv2.VideoCapture(index)
+        if cap.read()[0]:
+            arr.append(index)
+            cap.release()
+        index += 1
+        i -= 1
+    return arr
 
 def average(lst):
     if lst == None or len(lst) == 0:
@@ -157,7 +171,15 @@ def run():
     print("USE", __path, CODE)
     model = YOLO(__path)
     caches_ids = []
-    camera = cv2.VideoCapture(CAMERAS[0])
+    camera_ii = CAMERAS[0]
+    if camera_ii <0:
+        cameras = FindCamera()
+        if len(cameras) ==0:
+            print("Can not open camera")
+            return
+        camera_ii = cameras[0]
+    
+    camera = cv2.VideoCapture(camera_ii)
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     id = -1
