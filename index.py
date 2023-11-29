@@ -20,7 +20,7 @@ mac_add = "rvm"
 __env = HOME / ".env"
 _camera_env = HOME / ".camera.env"
 CODE = "8.4.0"
-CAMERAS = (0, 0, 0, 640, 480)
+CAMERAS = (-1, 0, 0, 640, 480)
 
 
 if os.path.exists(__env):
@@ -79,6 +79,20 @@ detext = False
 flag_camera = False
 
 
+def FindCamera():
+    # checks the first 10 indexes.
+    index = 0
+    arr = []
+    i = 10
+    while i > 0:
+        cap = cv2.VideoCapture(index)
+        if cap.read()[0]:
+            arr.append(index)
+            cap.release()
+        index += 1
+        i -= 1
+    return arr
+
 def average(lst):
     if lst == None or len(lst) == 0:
         return 0
@@ -92,12 +106,13 @@ def global_emit(event, data):
     global emit_times
     try:
         lastTime = emit_times.get(event, 0)
-        if time.time() - lastTime < 0.5:
+        if time.time() - lastTime < 0.5 and event!="result":
             return
         emit_times[event] = time.time()
 
         with app.test_request_context('/'):
             emit(event, data, broadcast=True, namespace="/")
+        
         print("emit", event, data, time.time())
     except Exception as e:
         print(e)
@@ -112,16 +127,16 @@ def sync_dir():
         socketio.sleep(30)
         now = datetime.strftime(datetime.now(), "%H:%M")
 
-        if now < "23:00":
+        if now < "20:00":
             date = datetime.strftime(datetime.utcnow() - timedelta(days=1), "%Y-%m-%d")
         else:
             date = datetime.strftime(datetime.utcnow(), "%Y-%m-%d")
         
         sync(mac_add, date)
 
-        if now < "23:00":
+        if now < "20:00":
             __date = datetime.now()
-            _delta_seconds = datetime(year=__date.year, month=__date.month, day=__date.day, hour=23, minute=1, second=0) - __date
+            _delta_seconds = datetime(year=__date.year, month=__date.month, day=__date.day, hour=20, minute=1, second=0) - __date
             socketio.sleep(_delta_seconds.seconds)
         else:
             socketio.sleep(seconds)
@@ -156,7 +171,15 @@ def run():
     print("USE", __path, CODE)
     model = YOLO(__path)
     caches_ids = []
-    camera = cv2.VideoCapture(CAMERAS[0])
+    camera_ii = CAMERAS[0]
+    if camera_ii <0:
+        cameras = FindCamera()
+        if len(cameras) ==0:
+            print("Can not open camera")
+            return
+        camera_ii = cameras[0]
+    
+    camera = cv2.VideoCapture(camera_ii)
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     id = -1
@@ -167,10 +190,7 @@ def run():
     images = []
     sizes = []
     tracker = Tracker()
-    # W, H = CAMERAS[3] - CAMERAS[1], CAMERAS[4] - CAMERAS[2]
-    # rw = 640.0 / W
-    # rh = 480.0 / H
-    # r = min(rw, rh)
+    
     while True:
         ret, im = camera.read()
         frameCount += 1
@@ -215,7 +235,7 @@ def run():
             
 
             if detext:
-                if frameCount % 4 != 0 or frameCount< 13:
+                if frameCount % 4 != 0 or frameCount< 4:
                     continue
 
                 endTime = time.time()
