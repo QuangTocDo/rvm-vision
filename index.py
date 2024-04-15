@@ -1,20 +1,23 @@
-import cv2
 import logging
-from flask import Flask, render_template
-from flask_socketio import SocketIO, send, emit
-from flask_cors import CORS
-from ultralytics import YOLO
-from uuid import getnode as get_mac
 import os
 import time
-from pathlib import Path
-import numpy as np
 from datetime import datetime, timedelta, timezone
-from s3_worker import unix, sync, init
+from pathlib import Path
+from uuid import getnode as get_mac
+
+import cv2
+import numpy as np
+from flask import Flask, render_template
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit, send
+from ultralytics import YOLO
+
 from config import get_model_path
+from s3_worker import init, sync, unix
+from tracker import Tracker
+
 # import supervision as sv
 
-from tracker import Tracker
 HOME = Path.home()
 mac_add = "rvm"
 __env = HOME / ".env"
@@ -87,11 +90,11 @@ def FindCamera():
     while i > 0:
         cap = cv2.VideoCapture(index)
         if cap.read()[0]:
-            arr.append(index)
             cap.release()
+            return index
         index += 1
         i -= 1
-    return arr
+    return -1
 
 def average(lst):
     if lst == None or len(lst) == 0:
@@ -164,6 +167,12 @@ def calc_avg(calc_ids):
         return 1
     return 2
 
+def open_camera(id_camera):
+    camera = cv2.VideoCapture(id_camera)
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    return camera
+
 
 def run():
     global detext, beginTime, flag_camera
@@ -172,16 +181,15 @@ def run():
     model = YOLO(__path)
     caches_ids = []
     camera_ii = CAMERAS[0]
-    if camera_ii <0:
-        cameras = FindCamera()
-        if len(cameras) ==0:
+    
+    if camera_ii < 0:
+        camera_ii = FindCamera()
+        if camera_ii < 0:
             print("Can not open camera")
             return
-        camera_ii = cameras[0]
     
-    camera = cv2.VideoCapture(camera_ii)
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    camera = open_camera(camera_ii)
+    
     id = -1
     frameCount = 0
 
@@ -190,10 +198,24 @@ def run():
     images = []
     sizes = []
     tracker = Tracker()
+    __error_times__ = 0
     
     while True:
         ret, im = camera.read()
+        if ret == False:
+            __error_times__ = __error_times__+1
+            if __error_times__ % 10 ==0:
+                camera_ii = FindCamera()
+                if camera_ii < 0:
+                    print("Can not open camera")
+                    continue
+                camera = open_camera(camera_ii)
+            socketio.sleep(0.1)
+            continue
+            
+        __error_times__ = 0
         frameCount += 1
+        
         if ret:
             img = im
             shape = img.shape
@@ -210,14 +232,17 @@ def run():
                     y1 = int(a[0, 1])
                     x2 = int(a[0, 2])
                     y2 = int(a[0, 3])
+                    
                     if x1 < CAMERAS[1]:
                         continue
+                    
                     if y1 < CAMERAS[2]:
                         continue
                     
                     score = float(boxx.conf[0])
                     idx_class = int(boxx.cls[0])
                     detections.append([x1, y1, x2, y2, idx_class, score])
+            
             tracker.update(img, detections)
             valid_boxes = []
             for track in tracker.tracks:
