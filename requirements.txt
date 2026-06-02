@@ -1,4 +1,3 @@
-ultralytics>=8.0.160
 lapx
 tensorflow
 pandas>=1.1.4

@@ -2,7 +2,7 @@ import os
 import sys
 from pathlib import Path
 FILE = Path(__file__).resolve()
-ROOT = FILE.parents[0]  # YOLOv5 root directory
+ROOT = FILE.parents[0]  
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
@@ -20,3 +20,65 @@ def get_model_path():
     if os.path.exists(local_model):
         return local_model
     return __weights
+
+# ===== TÍCH HỢP TỪ CONFIG.PY GỐC CỦA DỰ ÁN =====
+# Đảm bảo đường dẫn tham chiếu ngược ra ngoài thư mục gốc
+PROJECT_ROOT = FILE.parents[1]
+
+# ===== PATHS =====
+WEIGHTS_DIR = PROJECT_ROOT / "best_weights"
+DATABASE_DIR = PROJECT_ROOT / "best_embeddings"
+
+YOLO_DET_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_13thg5.onnx"
+YOLO_DET_MODEL_PATH  = WEIGHTS_DIR / "best.pt"
+YOLO_OBB_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_obb26thg3.onnx"
+TRIPLET_MODEL_ONNX_PATH= WEIGHTS_DIR / "model.onnx"
+TRIPLET_MODEL_PATH= WEIGHTS_DIR / "mbnv2_embedding19thg3.pth"
+GLASS_MODEL_PATH = WEIGHTS_DIR / "best_binary_classifier.pth"
+
+DATABASE_EMBEDDING_PATH = DATABASE_DIR / "brand_database.npz"
+DATABASE_EMBEDDING_PC = DATABASE_DIR / "brand_database_pc.npz"
+# DATABASE_EMBEDDING_G = DATABASE_DIR / "brand_database_g.npz"
+
+# ===== YOLO CONFIG =====
+YOLO_CONF = 0.9
+YOLO_IOU = 0.5
+YOLO_CONF_OBB = 0.7
+
+# ===== COSINE SIMILARITY =====
+SIM_THRESHOLD = 0.8
+MARGIN_THRESHOLD = 0.06
+OUTLIER_RADIUS_FLOOR = 0.15  # Ngưỡng sàn tối thiểu cho bán kính Outlier (tương đương Cosine Sim >= 0.85)
+# ===== DEVICE =====
+# DEVICE = "cuda:0"
+DEVICE = "mps"
+
+# ===== CAMERA =====
+CAMERA_INDEX = 0
+
+# ===== FPS SMOOTHING =====
+FPS_ALPHA = 0.5
+
+# ===== DISPLAY =====
+WINDOW_NAME = "Result"
+FONT_SCALE = 0.6
+FPS_FONT_SCALE = 0.8
+IMAGE_SIZE = (224,224)
+INPUT_SIZE = (320, 320)
+ALPHA = 0.7
+CLASSIFY_INTERVAL = 5
+CONF_THRESHOLD_CLASSIFY = 0.6
+
+# ===== LABELS & COLORS =====
+CLASS_NAMES = ['Can', 'Plastic']
+BRAND_COLORS = {
+    "Aquafina": (0, 255, 0),
+    "unknown": (0, 0, 255)
+}
+
+# ===== VOLUME ESTIMATION =====
+PIXEL_TO_CM_RATIO = 0.05
+VOLUME_SCALING_UP= 1.18
+VOLUME_SCALING_DOWN = 0.99
+MIN_ACCEPTABLE_VOLUME = 220
+MAX_ACCEPTABLE_VOLUME = 550
