@@ -41,12 +41,12 @@ DATABASE_EMBEDDING_PC = DATABASE_DIR / "brand_database_pc.npz"
 # DATABASE_EMBEDDING_G = DATABASE_DIR / "brand_database_g.npz"
 
 # ===== YOLO CONFIG =====
-YOLO_CONF = 0.9
-YOLO_IOU = 0.5
-YOLO_CONF_OBB = 0.7
+# YOLO_CONF_OBB = 0.7
+YOLO_CONF_DET = 0.8 
+YOLO_IOU_DET = 0.5
 
 # ===== COSINE SIMILARITY =====
-SIM_THRESHOLD = 0.8
+SIM_THRESHOLD = 0.85
 MARGIN_THRESHOLD = 0.06
 OUTLIER_RADIUS_FLOOR = 0.15  # Ngưỡng sàn tối thiểu cho bán kính Outlier (tương đương Cosine Sim >= 0.85)
 # ===== DEVICE =====
@@ -67,7 +67,8 @@ IMAGE_SIZE = (224,224)
 INPUT_SIZE = (320, 320)
 ALPHA = 0.7
 CLASSIFY_INTERVAL = 5
-CONF_THRESHOLD_CLASSIFY = 0.6
+# CONF_THRESHOLD_CLASSIFY = 0.6
+GLASS_CONF_THRESHOLD = 0.85
 
 # ===== LABELS & COLORS =====
 CLASS_NAMES = ['Can', 'Plastic']
@@ -78,7 +79,32 @@ BRAND_COLORS = {
 
 # ===== VOLUME ESTIMATION =====
 PIXEL_TO_CM_RATIO = 0.05
-VOLUME_SCALING_UP= 1.18
+VOLUME_SCALING_UP = 1.18
 VOLUME_SCALING_DOWN = 0.99
 MIN_ACCEPTABLE_VOLUME = 220
 MAX_ACCEPTABLE_VOLUME = 550
+
+# ===== SLIDING WINDOW & VOTING =====
+VOTING_WINDOW_CLASSIFIER = 5      # Cửa sổ vote của ClassifierWorker (VOTING_WINDOW)
+SLIDING_WINDOW_ROI = 10           # Cửa sổ trượt lưu lịch sử phát hiện trong ROI (SLIDING_WINDOW_SIZE)
+MIN_SAMPLES_ROI_CHECK = 5         # Số lượng mẫu tối thiểu để tính mật độ ROI
+ROI_STABILITY_THRESHOLD = 0.75    # Ngưỡng mật độ (> 75%) để coi là vật thể ổn định trong ROI
+
+# ===== INTERVALS & LIMITS =====
+DETECTION_TIMEOUT = 5             # Thời gian tối đa thu thập mẫu (giây) (beginTime - endTime > 5)
+MAX_DECISION_SAMPLES = 10         # Số lượng mẫu calc_ids tối đa cần thu thập để đưa ra kết luận
+EMA_SMOOTHING_ALPHA = 0.6         # Hệ số EMA làm mượt embedding
+
+# ===== ROI COORDINATES =====
+ROI_COORDS = (200, 25, 475, 400)  # (roi_x1, roi_y1, roi_x2, roi_y2)
+
+# ===== CAMERA RESOLUTION =====
+CAMERA_WIDTH = 640
+CAMERA_HEIGHT = 480
+
+# ===== FPS SMOOTHING ALPHAS =====
+FPS_ALPHA_YOLO = 0.1
+FPS_ALPHA_CLASSIFIER = 0.2
+FPS_ALPHA_GUI = 0.1
+
+

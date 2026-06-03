@@ -189,10 +189,11 @@ def calc_avg(calc_ids):
     most_common_class, count = counts.most_common(1)[0]
     return most_common_class
 
+
 def open_camera(id_camera):
     camera = cv2.VideoCapture(id_camera)
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
     return camera
 
 
@@ -235,7 +236,7 @@ class InferenceWorker(threading.Thread):
                 
                 valid_boxes = []
                 
-                results = self.detector(img, conf=0.7, agnostic_nms=True, iou=0.81, verbose=False)
+                results = self.detector(img, conf=config.YOLO_CONF_DET, agnostic_nms=True, iou=config.YOLO_IOU_DET, verbose=False)
                 
                 detections = []
                 if results[0].boxes.shape[0] > 0:
@@ -279,6 +280,7 @@ class InferenceWorker(threading.Thread):
             except Exception as e:
                 print(f"Worker Error: {e}")
 
+
 class ClassifierWorker(threading.Thread):
     def __init__(self, in_queue, out_queue):
         super().__init__()
@@ -293,17 +295,21 @@ class ClassifierWorker(threading.Thread):
             database_path=str(db_path)
         )
         
-        # --- NÂNG CẤP LỚP 2: Khởi tạo mô hình phân loại nhị phân PyTorch cho Thủy tinh Lanh dùng mô-đun riêng ---
-        self.device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
+        # --- Khởi tạo mô hình phân loại nhị phân PyTorch cho Thủy tinh Lanh dùng mô-đun riêng ---
+        if hasattr(config, "DEVICE") and config.DEVICE:
+            self.device = torch.device(config.DEVICE)
+        else:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
+            
         self.glass_classifier = GlassClassifier(
             model_path=config.GLASS_MODEL_PATH,
             device=self.device,
-            conf_thres=0.85
+            conf_thres=config.GLASS_CONF_THRESHOLD
         )
         
         self.track_embeddings = {}
         self.voting_history = {}
-        self.VOTING_WINDOW = 5
+        self.VOTING_WINDOW = config.VOTING_WINDOW_CLASSIFIER
         self._stop_event = threading.Event()
 
     def stop(self):
@@ -346,7 +352,7 @@ class ClassifierWorker(threading.Thread):
                                 if _id not in self.track_embeddings:
                                     self.track_embeddings[_id] = emb_norm
                                 else:
-                                    alpha = 0.6  # Hệ số làm mượt
+                                    alpha = config.EMA_SMOOTHING_ALPHA  # Hệ số làm mượt
                                     smoothed = alpha * self.track_embeddings[_id] + (1.0 - alpha) * emb_norm
                                     smoothed_norm = np.linalg.norm(smoothed)
                                     self.track_embeddings[_id] = smoothed / smoothed_norm if smoothed_norm > 0 else smoothed
@@ -378,6 +384,44 @@ class ClassifierWorker(threading.Thread):
             except Exception as e:
                 print(f"ClassifierWorker Error: {e}")
 
+
+def _evaluate_hierarchical_class(box, shape, roi_coords, volume_cache, track_cache):
+    """
+    Đánh giá phân lớp theo logic phân tầng (Hierarchical Decision Logic V2).
+    Trả về: (final_class, is_unknown_class2)
+    """
+    bbox, idx_class, conf, _id = box
+    x1, y1, x2, y2 = map(int, bbox)
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    
+    roi_x1, roi_y1, roi_x2, roi_y2 = roi_coords
+    final_class = 7  # Mặc định là INVALID (7)
+    is_unknown_class2 = False
+    
+    if roi_x1 < cx < roi_x2 and roi_y1 < cy < roi_y2:
+        current_vol = volume_cache.get(_id, -1)
+        # Bước 1: Kiểm tra Thể tích
+        if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME:
+            if idx_class == 0:
+                final_class = 2  # Lon
+            elif idx_class == 1:
+                # Chai nhựa
+                final_class = 1
+            elif idx_class == 2:
+                # Chai thủy tinh (phân lớp nhờ CNN nhị phân)
+                if _id in track_cache:
+                    brand, b_score = track_cache[_id]
+                    if brand.lower() == "lanh":
+                        final_class = 1  # valid class
+                    else:
+                        is_unknown_class2 = True
+                else:
+                    # Gán tạm nhãn 1 trong khi luồng ClassifierWorker tính toán dự đoán
+                    final_class = 1
+    
+    return final_class, is_unknown_class2
+
+
 def run():
     global detext, beginTime, flag_camera, detection_armed
     
@@ -404,10 +448,8 @@ def run():
     sizes = []
     __error_times__ = 0
     
-    roi_x1, roi_y1 = 200, 25
-    roi_x2, roi_y2 = 475, 400
+    roi_x1, roi_y1, roi_x2, roi_y2 = config.ROI_COORDS
     
-
     volume_cache = {}
     track_age_vol = {}  
     
@@ -417,7 +459,7 @@ def run():
     
     # Cửa sổ trượt lưu lịch sử phát hiện trong ROI (Sliding Window Filter)
     roi_sliding_windows = {}
-    SLIDING_WINDOW_SIZE = 6
+    SLIDING_WINDOW_SIZE = config.SLIDING_WINDOW_ROI
     
     in_queue = queue.Queue(maxsize=2)
     out_queue = queue.Queue(maxsize=2)
@@ -469,7 +511,6 @@ def run():
             if not cls_in_queue.full():
                 cls_in_queue.put(("cleanup", active_ids))
 
-
             detected_in_roi_this_frame = { _id: False for _id in active_ids }
 
             for box in valid_boxes:
@@ -485,7 +526,7 @@ def run():
                     
                     # 1. Đo thể tích vật thể
                     track_age_vol[_id] = track_age_vol.get(_id, 0) + 1
-                    if track_age_vol[_id] == 1 or track_age_vol[_id] % 5 == 0:
+                    if track_age_vol[_id] == 1 or track_age_vol[_id] % config.CLASSIFY_INTERVAL == 0:
                         w_box, h_box = x2 - x1, y2 - y1
                         length_px, diameter_px = max(w_box, h_box), min(w_box, h_box)
                         if length_px < 300:
@@ -501,7 +542,7 @@ def run():
                     current_vol = volume_cache.get(_id, -1)
                     if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME and idx_class in [0, 1, 2]:
                         track_age_cls[_id] = track_age_cls.get(_id, 0) + 1
-                        if track_age_cls[_id] == 1 or track_age_cls[_id] % 5 == 0:
+                        if track_age_cls[_id] == 1 or track_age_cls[_id] % config.CLASSIFY_INTERVAL == 0:
                             crop = crop_from_box(processed_frame, bbox)
                             if crop is not None and crop.size > 0:
                                 if not cls_in_queue.full():
@@ -555,14 +596,14 @@ def run():
                 for box in decision_boxes:
                     _id = box[3]
                     window = roi_sliding_windows.get(_id, [])
-                    if len(window) >= 5:
+                    if len(window) >= config.MIN_SAMPLES_ROI_CHECK:
                         density = sum(window) / len(window)
-                        if density >= 0.75:
+                        if density >= config.ROI_STABILITY_THRESHOLD:
                             is_stable = True
                             break
             
             if is_stable:
-                print("ARMED and object is stable in ROI (Sliding Window >= 75%). Triggering detection.")
+                print(f"ARMED and object is stable in ROI (Sliding Window >= {int(config.ROI_STABILITY_THRESHOLD * 100)}%). Triggering detection.")
                 detext = True
                 beginTime = time.time()
                 detection_armed = False
@@ -596,7 +637,7 @@ def run():
                 else:
                     endTime = time.time()
 
-                    if ii >= 8 or endTime - beginTime > 4:
+                    if ii >= config.MAX_DECISION_SAMPLES or endTime - beginTime > config.DETECTION_TIMEOUT:
                         avg = calc_avg(calc_ids) if ii > 0 else -1
                         global_emit('result', {'data': avg, 'model': str(__path), 'ver': CODE,
                                                "id": mac_add, "images": images, "size": average(sizes) if sizes else 0, "item": id,
@@ -616,39 +657,8 @@ def run():
                             id = _id
                             sizes.append(max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
                             
-                            # --- ĐỊNH TUYẾN PHÂN CẤP CLASS 3 LỚP (HIERARCHICAL ROUTING V2) ---
-                            final_class = 7 # Default to INVALID
-                            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                            
-                            is_unknown_class2 = False
-                            
-                            if roi_x1 < cx < roi_x2 and roi_y1 < cy < roi_y2:
-                                current_vol = volume_cache.get(_id, -1)
-                                if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME:
-                                    if idx_class == 0:
-                                        # brand, b_score = track_cache.get(_id, ("unknown", 0.0))
-                                        # if brand.lower() == "unknown":
-                                        final_class = 2
-                                        # else:
-                                        #     final_class = 2
-                                    elif idx_class == 1:
-                                        # brand, b_score = track_cache.get(_id, ("unknown", 0.0))
-                                        # if brand.lower() == "aquafina":
-                                        #     final_class = 1
-                                        # else:
-                                        #     final_class = 1
-                                        final_class = 1
-                                    elif idx_class == 2:
-                                        # Only check brand if the classifier has produced a prediction
-                                        if _id in track_cache:
-                                            brand, b_score = track_cache[_id]
-                                            if brand.lower() == "lanh":
-                                                final_class = 1
-                                            else:
-                                                is_unknown_class2 = True
-                                        else:
-                                            # Temporarily assign class 1 until brand prediction is available
-                                            final_class = 1
+                            # --- HIERARCHICAL DECISION LOGIC V2 ---
+                            final_class, is_unknown_class2 = _evaluate_hierarchical_class(box, shape, config.ROI_COORDS, volume_cache, track_cache)
                             
                             if is_unknown_class2:
                                 print("--- Unknown brand detected for class 2. Terminating detection immediately! ---")
@@ -662,7 +672,6 @@ def run():
                                 flag_camera = False
                             else:
                                 calc_ids.append(transform_id(final_class))
-                                # calc_ids.append(final_class)
 
                         else:
                             global_emit('command', 0)
