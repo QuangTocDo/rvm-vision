@@ -26,18 +26,18 @@ def get_model_path():
 PROJECT_ROOT = FILE.parents[1]
 
 # ===== PATHS =====
-WEIGHTS_DIR = PROJECT_ROOT / "best_weights"
-DATABASE_DIR = PROJECT_ROOT / "best_embeddings"
+# WEIGHTS_DIR = PROJECT_ROOT / "best_weights"
+# DATABASE_DIR = PROJECT_ROOT / "best_embeddings"
 
-# WEIGHTS_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/weights"
-# DATABASE_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/database"
+WEIGHTS_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/weights"
+DATABASE_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/database"
 
 YOLO_DET_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_13thg5.onnx"
 YOLO_DET_MODEL_PATH  = WEIGHTS_DIR / "best.pt"
 YOLO_OBB_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_obb26thg3.onnx"
 TRIPLET_MODEL_ONNX_PATH= WEIGHTS_DIR / "model.onnx"
 TRIPLET_MODEL_PATH= WEIGHTS_DIR / "mbnv2_embedding19thg3.pth"
-TRIPLET_MODEL_PATH_GLASS= WEIGHTS_DIR / "best_embedding_glass.pth"
+TRIPLET_MODEL_PATH_GLASS= WEIGHTS_DIR / "embedding_model_g.pth"
 GLASS_MODEL_PATH = WEIGHTS_DIR / "best_binary_classifier.pth"
 
 DATABASE_EMBEDDING_PATH = DATABASE_DIR / "brand_database.npz"
