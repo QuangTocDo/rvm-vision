@@ -1,4 +1,5 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import time
 import math
@@ -14,6 +15,23 @@ import torch
 from flask import Flask, render_template
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+
+def setup_logger():
+    logger = logging.getLogger("RVM_Vision")
+    logger.setLevel(logging.INFO)
+    
+    log_file = "rvm_vision_system.log"
+    handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    return logger
+
+logger = setup_logger()
 
 # ADD GLOBAL ROOT PATH
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -105,9 +123,9 @@ def global_emit(event, data):
         with app.test_request_context('/'):
             emit(event, data, broadcast=True, namespace="/")
 
-        print("emit", event, data, time.time())
+        logger.info(f"emit {event} {data} {time.time()}")
     except Exception as e:
-        print(e)
+        logger.error(f"Error in global_emit: {e}", exc_info=True)
         pass
 
 def sync_dir():
@@ -158,11 +176,38 @@ def calc_avg(calc_ids):
     most_common_class, count = counts.most_common(1)[0]
     return most_common_class
 
+cache_lock = threading.Lock()
+camera_reconnecting = False
+camera = None
+
+def reconnect_camera_async():
+    """Khởi chạy luồng ngầm kết nối lại camera bất đồng bộ"""
+    global camera, camera_reconnecting
+    if camera_reconnecting:
+        return
+        
+    def target():
+        global camera, camera_reconnecting
+        camera_reconnecting = True
+        logger.info("Đang tìm kết nối lại camera ở luồng ngầm...")
+        camera_ii = -1
+        while camera_ii < 0:
+            camera_ii = FindCamera()
+            if camera_ii >= 0:
+                with cache_lock:
+                    camera = open_camera(camera_ii)
+                logger.info(f"Kết nối lại thành công camera tại index: {camera_ii}")
+                break
+            time.sleep(2.0)
+        camera_reconnecting = False
+
+    threading.Thread(target=target, daemon=True).start()
+
 def run():
-    global detext, beginTime, flag_camera, detection_armed
+    global detext, beginTime, flag_camera, detection_armed, camera
     
     __path = config.YOLO_DET_MODEL_PATH
-    print("INIT AI CORE WITH HIERARCHICAL ROUTING V2", __path)
+    logger.info(f"INIT AI CORE WITH HIERARCHICAL ROUTING V2 {__path}")
 
     caches_ids = []
     camera_ii = CAMERAS[0]
@@ -170,10 +215,11 @@ def run():
     if camera_ii < 0:
         camera_ii = FindCamera()
         if camera_ii < 0:
-            print("Can not open camera")
+            logger.error("Can not open camera")
             return
 
-    camera = open_camera(camera_ii)
+    with cache_lock:
+        camera = open_camera(camera_ii)
 
     id = -1
     frameCount = 0
@@ -210,14 +256,14 @@ def run():
     cls_worker.start()
 
     while True:
-        ret, im = camera.read()
+        with cache_lock:
+            if camera is not None:
+                ret, im = camera.read()
+            else:
+                ret, im = False, None
         if not ret:
-            __error_times__ += 1
-            if __error_times__ % 10 == 0:
-                camera_ii = FindCamera()
-                if camera_ii >= 0:
-                    camera = open_camera(camera_ii)
-            socketio.sleep(0.1)
+            reconnect_camera_async()
+            socketio.sleep(0.5)
             continue
 
         __error_times__ = 0
@@ -231,17 +277,19 @@ def run():
             while not cls_out_queue.empty():
                 try:
                     res_id, res_class, res_score = cls_out_queue.get_nowait()
-                    track_cache[res_id] = (res_class, res_score)
+                    with cache_lock:
+                        track_cache[res_id] = (res_class, res_score)
                 except queue.Empty:
                     break
             
             # --- TÍNH TOÁN VÀ ĐỒNG BỘ CÁC BỘ ĐỆM CHO TẤT CẢ VẬT THỂ ĐANG ĐƯỢC BÁM VẾT ---
             active_ids = {box[3] for box in valid_boxes}
-            for cache_dict in (volume_cache, track_age_vol, track_cache, track_age_cls, roi_sliding_windows):
-                inactive_keys = cache_dict.keys() - active_ids
-                for k in inactive_keys:
-                    if k in cache_dict:
-                        del cache_dict[k]
+            with cache_lock:
+                for cache_dict in (volume_cache, track_age_vol, track_cache, track_age_cls, roi_sliding_windows):
+                    inactive_keys = cache_dict.keys() - active_ids
+                    for k in inactive_keys:
+                        if k in cache_dict:
+                            del cache_dict[k]
             
             # Gửi yêu cầu dọn dẹp sang ClassifierWorker
             if not cls_in_queue.full():
@@ -261,24 +309,28 @@ def run():
                     detected_in_roi_this_frame[_id] = True
                     
                     # 1. Đo thể tích vật thể
-                    track_age_vol[_id] = track_age_vol.get(_id, 0) + 1
-                    if track_age_vol[_id] == 1 or track_age_vol[_id] % config.CLASSIFY_INTERVAL == 0:
+                    with cache_lock:
+                        track_age_vol[_id] = track_age_vol.get(_id, 0) + 1
+                        is_vol_calc_frame = (track_age_vol[_id] == 1 or track_age_vol[_id] % config.CLASSIFY_INTERVAL == 0)
+                    if is_vol_calc_frame:
                         w_box, h_box = x2 - x1, y2 - y1
                         length_px, diameter_px = max(w_box, h_box), min(w_box, h_box)
                         if length_px < 300:
                             vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_UP)
-                            volume_cache[_id] = vol
                         elif length_px > 700:
                             vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_DOWN)
-                            volume_cache[_id] = vol
                         else:
                             vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, 1)
+                        with cache_lock:
                             volume_cache[_id] = vol
                     # 2. Nhận diện thương hiệu (chỉ khi thể tích hợp lệ và idx_class thuộc [0, 1, 2])
-                    current_vol = volume_cache.get(_id, -1)
+                    with cache_lock:
+                        current_vol = volume_cache.get(_id, -1)
                     if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME and idx_class in [0, 1, 2]:
-                        track_age_cls[_id] = track_age_cls.get(_id, 0) + 1
-                        if track_age_cls[_id] == 1 or track_age_cls[_id] % config.CLASSIFY_INTERVAL == 0:
+                        with cache_lock:
+                            track_age_cls[_id] = track_age_cls.get(_id, 0) + 1
+                            is_cls_calc_frame = (track_age_cls[_id] == 1 or track_age_cls[_id] % config.CLASSIFY_INTERVAL == 0)
+                        if is_cls_calc_frame:
                             crop = crop_from_box(processed_frame, bbox)
                             if crop is not None and crop.size > 0:
                                 if not cls_in_queue.full():
@@ -286,11 +338,12 @@ def run():
                                     cls_in_queue.put(("classify", _id, crop, db_type))
 
             # Cập nhật Cửa sổ trượt cho tất cả các ID đang hoạt động
-            for _id in active_ids:
-                if _id not in roi_sliding_windows:
-                    roi_sliding_windows[_id] = deque(maxlen=SLIDING_WINDOW_SIZE)
-                is_detected = detected_in_roi_this_frame.get(_id, False)
-                roi_sliding_windows[_id].append(1 if is_detected else 0)
+            with cache_lock:
+                for _id in active_ids:
+                    if _id not in roi_sliding_windows:
+                        roi_sliding_windows[_id] = deque(maxlen=SLIDING_WINDOW_SIZE)
+                    is_detected = detected_in_roi_this_frame.get(_id, False)
+                    roi_sliding_windows[_id].append(1 if is_detected else 0)
 
             # --- KIỂM TRA SỰ XUẤT HIỆN CỦA TAY TRONG VÙNG ROI ---
             is_hand_in_roi = False
@@ -305,14 +358,15 @@ def run():
 
             # --- LỌC BỎ CÁC VẬT THỂ SAI KÍCH THƯỚC ĐỂ COI NHƯ KHÔNG CÓ VẬT THỂ ---
             decision_boxes = []
-            for box in valid_boxes:
-                bbox, idx_class, conf, _id = box
-                if idx_class == 5:
-                    continue  # Bỏ qua tay khi lọc chai
-                vol = volume_cache.get(_id, -1)
-                if vol != -1 and not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
-                    continue
-                decision_boxes.append(box)
+            with cache_lock:
+                for box in valid_boxes:
+                    bbox, idx_class, conf, _id = box
+                    if idx_class == 5:
+                        continue  # Bỏ qua tay khi lọc chai
+                    vol = volume_cache.get(_id, -1)
+                    if vol != -1 and not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
+                        continue
+                    decision_boxes.append(box)
 
             len_decision_boxes = len(decision_boxes)
             
@@ -339,7 +393,7 @@ def run():
                             break
             
             if is_stable:
-                print(f"ARMED and object is stable in ROI (Sliding Window >= {int(config.ROI_STABILITY_THRESHOLD * 100)}%). Triggering detection.")
+                logger.info(f"ARMED and object is stable in ROI (Sliding Window >= {int(config.ROI_STABILITY_THRESHOLD * 100)}%). Triggering detection.")
                 detext = True
                 beginTime = time.time()
                 detection_armed = False
@@ -357,7 +411,7 @@ def run():
 
             # --- TỰ ĐỘNG NGẮT SOI KHẨN CẤP NẾU CÓ TAY XUẤT HIỆN TRONG ROI ---
             if detext and is_hand_in_roi:
-                print("--- Hand detected in ROI! Aborting detection immediately! ---")
+                logger.info("--- Hand detected in ROI! Aborting detection immediately! ---")
                 global_emit('result', {'data': -1, 'model': str(__path), 'ver': CODE,
                                        "id": mac_add, "images": images, "size": 0, "item": -1,
                                        "volume": 0.0})
@@ -375,11 +429,13 @@ def run():
 
                     if ii >= config.MAX_DECISION_SAMPLES or endTime - beginTime > config.DETECTION_TIMEOUT:
                         avg = calc_avg(calc_ids) if ii > 0 else -1
+                        with cache_lock:
+                            vol_val = float(volume_cache.get(id, -1))
                         global_emit('result', {'data': avg, 'model': str(__path), 'ver': CODE,
                                                "id": mac_add, "images": images, "size": average(sizes) if sizes else 0, "item": id,
-                                               "volume": float(volume_cache.get(id, -1))})
+                                               "volume": vol_val})
                         with open("log.txt", "a", encoding="utf-8") as f:
-                            f.write(f"{datetime.now()} | data={avg} | id={mac_add} | images={images} | size={average(sizes) if sizes else 0} | item={id} | volume={float(volume_cache.get(id, -1))}\n")
+                            f.write(f"{datetime.now()} | data={avg} | id={mac_add} | images={images} | size={average(sizes) if sizes else 0} | item={id} | volume={vol_val}\n")
                         detext = False
                         final_result = 0
                         images, sizes, calc_ids, id = [], [], [], -1
@@ -394,13 +450,16 @@ def run():
                             sizes.append(max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
                             
                             # --- HIERARCHICAL DECISION LOGIC V2 ---
-                            final_class, is_unknown_class2 = evaluate_hierarchical_class(box, volume_cache, track_cache, config.ROI_COORDS)
+                            with cache_lock:
+                                final_class, is_unknown_class2 = evaluate_hierarchical_class(box, volume_cache, track_cache, config.ROI_COORDS)
                             
                             if is_unknown_class2:
-                                print("--- Unknown brand detected for class 2. Terminating detection immediately! ---")
+                                logger.info("--- Unknown brand detected for class 2. Terminating detection immediately! ---")
+                                with cache_lock:
+                                    vol_val = float(volume_cache.get(id, -1))
                                 global_emit('result', {'data': 7, 'model': str(__path), 'ver': CODE,
                                             "id": mac_add, "images": images, "size": average(sizes) if sizes else 0, "item": id,
-                                            "volume": float(volume_cache.get(id, -1))})
+                                            "volume": vol_val})
                                 global_emit('command', 0)
                                 detext = False
                                 final_result = 0
@@ -442,33 +501,33 @@ def run():
 
 @socketio.on('connect')
 def connect(data):
-    print(data)
+    logger.info(f"Client connected with data: {data}")
     pass
 
 
 @socketio.event
 def my_event(message):
-    print(message)
+    logger.info(f"my_event message: {message}")
     emit('my_response', {'data': message["data"]}, broadcast=True)
 
 
 @socketio.event
 def run_detect(data):
     global detext, beginTime, flag_camera, __dict, detection_armed
-    print(data, "data", time.time() - beginTime, time.time())
+    logger.info(f"run_detect: {data} | time since begin: {time.time() - beginTime:.4f}s | current: {time.time()}")
     if "transform" in data:
         __dict = data["transform"]
-        print(__dict, transform_id(4))
+        logger.info(f"Updated transform dict: {__dict} | transform(4)={transform_id(4)}")
 
     if "detext" in data:
         if data["detext"]:
             if not detext and not detection_armed:
-                print("Arming for detection...")
+                logger.info("Arming for detection...")
                 detection_armed = True
         else:
             detext = False
             detection_armed = False
-            print("Detection cancelled by user.")
+            logger.info("Detection cancelled by user.")
 
     if "camera" in data:
         flag_camera = data["camera"]
@@ -485,9 +544,8 @@ def index():
 
 
 if __name__ == "__main__":
-    print("OPEN CAMERA", mac_add, CAMERAS, datetime.strftime(
-        datetime.utcnow(), "%Y-%m-%d %X%Z"))
+    logger.info(f"OPEN CAMERA | mac: {mac_add} | config: {CAMERAS} | {datetime.strftime(datetime.utcnow(), '%Y-%m-%d %X%Z')}")
     socketio.start_background_task(target=run)
     socketio.start_background_task(target=sync_dir)
-    print("RUNS")
+    logger.info("RUNS")
     socketio.run(app)

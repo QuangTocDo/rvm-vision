@@ -10,6 +10,8 @@ import queue
 import torch
 import math
 from collections import deque, Counter
+import logging
+from logging.handlers import RotatingFileHandler
 
 import config
 
@@ -23,6 +25,25 @@ from utils.hierarchy import evaluate_hierarchical_class, estimate_volume
 from utils.hud import draw_premium_hud, draw_predictions
 from workers.inference import InferenceWorker
 from workers.classifier import ClassifierWorker
+
+def setup_logger():
+    logger = logging.getLogger("RVM_Vision")
+    logger.setLevel(logging.INFO)
+    
+    # Thiết lập RotatingFileHandler: tối đa 5MB/file, giữ lại tối đa 5 file backups
+    log_file = "rvm_vision_system.log"
+    handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
+    # Đồng thời xuất ra màn hình console (tiện debug dev mode)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    return logger
+
+logger = setup_logger()
 
 HOME = Path.home()
 mac_add = "rvm"
@@ -65,13 +86,17 @@ def calc_avg(calc_ids):
     return most_common_class
 
 def global_emit(event, data):
-    print(f"[EMIT MOCK] event: {event} | data: {data}")
+    logger.info(f"[EMIT MOCK] event: {event} | data: {data}")
 
 class RealtimeDevPipeline:
     def __init__(self, camera_idx):
         global CAMERAS
         self.camera_idx = camera_idx
         self.cap = open_camera(camera_idx)
+        
+        # Cờ báo hiệu đang kết nối lại camera ngầm và Khóa đồng bộ luồng
+        self.camera_reconnecting = False
+        self.cache_lock = threading.Lock()
         
         self.in_queue = queue.Queue(maxsize=2)
         self.out_queue = queue.Queue(maxsize=2)
@@ -107,10 +132,30 @@ class RealtimeDevPipeline:
         self.prev_loop_time = time.time()
         self.smoothed_fps = 0.0
 
+    def reconnect_camera_async(self):
+        """Khởi chạy luồng ngầm kết nối lại camera bất đồng bộ"""
+        if self.camera_reconnecting:
+            return
+            
+        def target():
+            self.camera_reconnecting = True
+            logger.info("Đang tìm kết nối lại camera ở luồng ngầm...")
+            camera_ii = -1
+            while camera_ii < 0:
+                camera_ii = FindCamera()
+                if camera_ii >= 0:
+                    self.cap = open_camera(camera_ii)
+                    logger.info(f"Kết nối lại thành công camera tại index: {camera_ii}")
+                    break
+                time.sleep(2.0)
+            self.camera_reconnecting = False
+
+        threading.Thread(target=target, daemon=True).start()
+
     def run(self):
         global detext, beginTime, CAMERAS
-        print("--- FULLY AUTOMATIC DETECTION MODE (HIERARCHICAL LOGIC V2 + PYTORCH GLASS CNN) ---")
-        print("Press 'q' to quit.")
+        logger.info("--- FULLY AUTOMATIC DETECTION MODE (HIERARCHICAL LOGIC V2 + PYTORCH GLASS CNN) ---")
+        logger.info("Press 'q' to quit.")
 
         id = -1
         frameCount = 0
@@ -123,12 +168,15 @@ class RealtimeDevPipeline:
         while True:
             ret, frame_curr = self.cap.read()
             if not ret:
-                __error_times__ += 1
-                if __error_times__ % 10 == 0:
-                    camera_ii = FindCamera()
-                    if camera_ii >= 0:
-                        self.cap = open_camera(camera_ii)
-                time.sleep(0.1)
+                # Kích hoạt kết nối lại bất đồng bộ
+                self.reconnect_camera_async()
+                
+                # Hiển thị màn hình chờ kết nối mà không bị đóng băng UI
+                placeholder_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(placeholder_frame, "CAMERA DISCONNECTED! RECONNECTING...", 
+                            (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                cv2.imshow("RVM DEV MODE (AUTO)", placeholder_frame)
+                cv2.waitKey(100)
                 continue
             __error_times__ = 0
             
@@ -150,16 +198,19 @@ class RealtimeDevPipeline:
                 while not self.cls_out_queue.empty():
                     try:
                         res_id, res_class, res_score = self.cls_out_queue.get_nowait()
-                        self.track_cache[res_id] = (res_class, res_score)
+                        with self.cache_lock:
+                            self.track_cache[res_id] = (res_class, res_score)
                     except queue.Empty:
                         break
                 
                 # --- TÍNH TOÁN VÀ ĐỒNG BỘ AI CHO TẤT CẢ VẬT THỂ ĐANG ĐƯỢC BÁM VẾT ---
                 active_ids = {box[3] for box in valid_boxes}
-                for cache_dict in (self.track_cache, self.track_age_cls, self.volume_cache, self.track_age_vol, self.roi_sliding_windows):
-                    inactive_keys = cache_dict.keys() - active_ids
-                    for k in inactive_keys:
-                        del cache_dict[k]
+                with self.cache_lock:
+                    for cache_dict in (self.track_cache, self.track_age_cls, self.volume_cache, self.track_age_vol, self.roi_sliding_windows):
+                        inactive_keys = cache_dict.keys() - active_ids
+                        for k in inactive_keys:
+                            if k in cache_dict:
+                                del cache_dict[k]
                 
                 # Gửi yêu cầu dọn dẹp sang ClassifierWorker
                 if not self.cls_in_queue.full():
@@ -180,24 +231,32 @@ class RealtimeDevPipeline:
                         detected_in_roi_this_frame[_id] = True
                         
                         # 1. Đo thể tích vật thể
-                        self.track_age_vol[_id] = self.track_age_vol.get(_id, 0) + 1
-                        if self.track_age_vol[_id] == 1 or self.track_age_vol[_id] % config.CLASSIFY_INTERVAL == 0:
+                        with self.cache_lock:
+                            self.track_age_vol[_id] = self.track_age_vol.get(_id, 0) + 1
+                            is_vol_calc_frame = (self.track_age_vol[_id] == 1 or self.track_age_vol[_id] % config.CLASSIFY_INTERVAL == 0)
+                            
+                        if is_vol_calc_frame:
                             w_box, h_box = x2 - x1, y2 - y1
                             length_px, diameter_px = max(w_box, h_box), min(w_box, h_box)
                             if length_px < 300:
                                 vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_UP)
-                                self.volume_cache[_id] = vol
                             elif length_px > 700:
                                 vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_DOWN)
-                                self.volume_cache[_id] = vol
                             else:
                                 vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, 1)
+                            
+                            with self.cache_lock:
                                 self.volume_cache[_id] = vol
+                                
                         # 2. Nhận diện thương hiệu (chỉ khi thể tích hợp lệ và idx_class là 0, 1, hoặc 2)
-                        current_vol = self.volume_cache.get(_id, -1)
+                        with self.cache_lock:
+                            current_vol = self.volume_cache.get(_id, -1)
                         if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME and idx_class in [0, 1, 2]:
-                            self.track_age_cls[_id] = self.track_age_cls.get(_id, 0) + 1
-                            if self.track_age_cls[_id] == 1 or self.track_age_cls[_id] % config.CLASSIFY_INTERVAL == 0:
+                            with self.cache_lock:
+                                self.track_age_cls[_id] = self.track_age_cls.get(_id, 0) + 1
+                                is_cls_calc_frame = (self.track_age_cls[_id] == 1 or self.track_age_cls[_id] % config.CLASSIFY_INTERVAL == 0)
+                                
+                            if is_cls_calc_frame:
                                 crop = crop_from_box(processed_frame, bbox)
                                 if crop is not None and crop.size > 0:
                                     if not self.cls_in_queue.full():
@@ -206,22 +265,24 @@ class RealtimeDevPipeline:
                                         self.cls_in_queue.put(("classify", _id, crop, db_type))
                 
                 # Cập nhật Sliding Window cho tất cả các ID đang hoạt động
-                for _id in active_ids:
-                    if _id not in self.roi_sliding_windows:
-                        self.roi_sliding_windows[_id] = deque(maxlen=self.SLIDING_WINDOW_SIZE)
-                    is_detected = detected_in_roi_this_frame.get(_id, False)
-                    self.roi_sliding_windows[_id].append(1 if is_detected else 0)
+                with self.cache_lock:
+                    for _id in active_ids:
+                        if _id not in self.roi_sliding_windows:
+                            self.roi_sliding_windows[_id] = deque(maxlen=self.SLIDING_WINDOW_SIZE)
+                        is_detected = detected_in_roi_this_frame.get(_id, False)
+                        self.roi_sliding_windows[_id].append(1 if is_detected else 0)
 
                 # --- LỌC BỎ CÁC VẬT THỂ SAI KÍCH THƯỚC ĐỂ COI NHƯ KHÔNG CÓ VẬT THỂ ---
                 decision_boxes = []
-                for box in valid_boxes:
-                    bbox, idx_class, conf, _id = box
-                    if idx_class == 5:
-                        continue  # Bỏ qua tay khi lọc chai
-                    vol = self.volume_cache.get(_id, -1)
-                    if vol != -1 and not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
-                        continue
-                    decision_boxes.append(box)
+                with self.cache_lock:
+                    for box in valid_boxes:
+                        bbox, idx_class, conf, _id = box
+                        if idx_class == 5:
+                            continue  # Bỏ qua tay khi lọc chai
+                        vol = self.volume_cache.get(_id, -1)
+                        if vol != -1 and not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
+                            continue
+                        decision_boxes.append(box)
 
                 len_decision_boxes = len(decision_boxes)
 
@@ -270,13 +331,14 @@ class RealtimeDevPipeline:
                 else:
                     global_emit('command', 0)
 
-                # Vẽ bounding boxes, thương hiệu và thể tích
-                draw_predictions(display_img, valid_boxes, self.volume_cache, self.track_cache, self.colors)
+                # Vẽ bounding boxes, thương hiệu và thể tích (đồng bộ khóa bảo vệ cache)
+                with self.cache_lock:
+                    draw_predictions(display_img, valid_boxes, self.volume_cache, self.track_cache, self.colors)
 
                 cv2.imshow("RVM DEV MODE (AUTO)", display_img)
                 
                 if detext and is_hand_in_roi:
-                    print("--- Hand detected in ROI! Aborting detection immediately! ---")
+                    logger.info("--- Hand detected in ROI! Aborting detection immediately! ---")
                     global_emit('result', {'data': -1, 'model': str(self.__path), 'ver': CODE,
                                            "id": mac_add, "images": "mock_images", "size": 0, "item": -1})
                     global_emit('command', 0)
@@ -285,20 +347,21 @@ class RealtimeDevPipeline:
                     calc_ids = []
                     id = -1
                     detection_armed = True
-                    print("\n--- System re-armed due to Hand safety trigger. ---")
+                    logger.info("\n--- System re-armed due to Hand safety trigger. ---")
 
                 elif detection_armed and is_object_in_roi and not detext and not is_hand_in_roi:
                     is_stable = False
-                    for box in decision_boxes:
-                        _id = box[3]
-                        window = self.roi_sliding_windows.get(_id, [])
-                        if len(window) >= config.MIN_SAMPLES_ROI_CHECK:
-                            density = sum(window) / len(window)
-                            if density >= config.ROI_STABILITY_THRESHOLD: 
-                                is_stable = True
-                                break
+                    with self.cache_lock:
+                        for box in decision_boxes:
+                            _id = box[3]
+                            window = self.roi_sliding_windows.get(_id, [])
+                            if len(window) >= config.MIN_SAMPLES_ROI_CHECK:
+                                density = sum(window) / len(window)
+                                if density >= config.ROI_STABILITY_THRESHOLD: 
+                                    is_stable = True
+                                    break
                     if is_stable:
-                        print(f"--- Object is stable in ROI (sliding window density >= {int(config.ROI_STABILITY_THRESHOLD * 100)}%). Triggering detection! ---")
+                        logger.info(f"--- Object is stable in ROI (sliding window density >= {int(config.ROI_STABILITY_THRESHOLD * 100)}%). Triggering detection! ---")
                         detext = True
                         beginTime = time.time()
                         detection_armed = False
@@ -311,9 +374,9 @@ class RealtimeDevPipeline:
 
                         if ii >= config.MAX_DECISION_SAMPLES or endTime - beginTime > config.DETECTION_TIMEOUT:
                             avg = calc_avg(calc_ids)
-                            print(f"--- DETECTION FINISHED ---")
-                            print(f"Collected IDs: {calc_ids}")
-                            print(f"Final Average Result: {avg} (0=Aquafina, 1=Plastic, 2=Can, 7=Invalid)")
+                            logger.info(f"--- DETECTION FINISHED ---")
+                            logger.info(f"Collected IDs: {calc_ids}")
+                            logger.info(f"Final Average Result: {avg} (0=Aquafina, 1=Plastic, 2=Can, 7=Invalid)")
                             global_emit('result', {'data': avg, 'model': str(self.__path), 'ver': CODE,
                                         "id": mac_add, "images": "mock_images", "size": average(sizes), "item": id})
                             
@@ -322,7 +385,7 @@ class RealtimeDevPipeline:
                             calc_ids = []
                             id = -1
                             detection_armed = True 
-                            print("\n--- System re-armed. Waiting for next object. ---")
+                            logger.info("\n--- System re-armed. Waiting for next object. ---")
 
                         else:
                             if len_decision_boxes > 0:
@@ -333,10 +396,11 @@ class RealtimeDevPipeline:
                                 sizes.append(max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
                                 
                                 # --- HIERARCHICAL DECISION LOGIC V2 ---
-                                final_class, is_unknown_class2 = evaluate_hierarchical_class(box, self.volume_cache, self.track_cache, (self.roi_x1, self.roi_y1, self.roi_x2, self.roi_y2))
+                                with self.cache_lock:
+                                    final_class, is_unknown_class2 = evaluate_hierarchical_class(box, self.volume_cache, self.track_cache, (self.roi_x1, self.roi_y1, self.roi_x2, self.roi_y2))
                                 
                                 if is_unknown_class2:
-                                    print("--- Unknown brand detected for class 2. Terminating detection immediately! ---")
+                                    logger.info("--- Unknown brand detected for class 2. Terminating detection immediately! ---")
                                     global_emit('result', {'data': 7, 'model': str(self.__path), 'ver': CODE,
                                                 "id": mac_add, "images": "mock_images", "size": average(sizes) if sizes else 0, "item": id})
                                     global_emit('command', 0)
@@ -345,14 +409,14 @@ class RealtimeDevPipeline:
                                     calc_ids = []
                                     id = -1
                                     detection_armed = True
-                                    print("\n--- System re-armed due to Class 2 Unknown brand. ---")
+                                    logger.info("\n--- System re-armed due to Class 2 Unknown brand. ---")
                                   
                                 else:
                                     calc_ids.append(transform_id(final_class))
                             else:
                                 global_emit('command', 0)
                             
-                            print(f"   [DETECTING] collecting... calc_ids: {calc_ids}")
+                            logger.info(f"   [DETECTING] collecting... calc_ids: {calc_ids}")
 
             except queue.Empty:
                 pass
@@ -362,7 +426,7 @@ class RealtimeDevPipeline:
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
-                print("Exiting...")
+                logger.info("Exiting...")
                 break
 
         self.worker.stop() 
@@ -393,7 +457,7 @@ if __name__ == "__main__":
     if camera_ii < 0:
         camera_ii = FindCamera()
         if camera_ii < 0:
-            print("Can not open camera")
+            logger.error("Can not open camera")
             sys.exit(1)
 
     pipeline = RealtimeDevPipeline(camera_ii)
