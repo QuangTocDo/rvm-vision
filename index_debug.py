@@ -1,6 +1,3 @@
-# from albumentations.augmentations import domain_adaptation_functional
-# Chỉ định cấu hình chạy độc quyền trên GPU số 1 để tránh lỗi tràn bộ nhớ (OOM)
-# LƯU Ý: Phải đặt trước khi import torch
 import os
 import sys
 import time
