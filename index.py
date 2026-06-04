@@ -2,9 +2,8 @@ import logging
 import os
 import time
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
-from uuid import getnode as get_mac
 import sys
 import threading
 import queue
@@ -14,20 +13,19 @@ import torch
 # pyrefly: ignore [missing-import]
 from flask import Flask, render_template
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, send
+from flask_socketio import SocketIO, emit
 
 # ADD GLOBAL ROOT PATH
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import config
-from config import get_model_path
 from s3_worker import init, sync, unix
 from tracker import Tracker
 
-# IMPORT CORE AI
-from ultralytics import YOLO
-from onnx_v2.triplet_classifier import TripletClassifier
-from onnx_v2.glass_classifier import GlassClassifier
+from utils.camera_utils import FindCamera, open_camera
 from utils.helper_functions import crop_from_box
+from utils.hierarchy import evaluate_hierarchical_class, estimate_volume
+from workers.inference import InferenceWorker
+from workers.classifier import ClassifierWorker
 from collections import deque, Counter
 
 HOME = Path.home()
@@ -89,36 +87,12 @@ detext = False
 flag_camera = False
 detection_armed = False # Trạng thái chờ (armed)
 
-def FindCamera():
-    index = 0
-    i = 10
-    while i > 0:
-        cap = cv2.VideoCapture(index)
-        if cap.read()[0]:
-            cap.release()
-            return index
-        index += 1
-        i -= 1
-    return -1
-
-
-# +++ HÀM TÍNH THỂ TÍCH VẬT THỂ +++
-def estimate_volume(width, height, scale=config.PIXEL_TO_CM_RATIO, k=1.0):
-    length_cm = width * scale
-    diameter_cm = height * scale
-    r = diameter_cm / 2
-    volume = math.pi * (r ** 2) * length_cm * k
-    return volume
-
-
 def average(lst):
     if lst == None or len(lst) == 0:
         return 0
     return sum(lst) / len(lst)
 
-
 emit_times = {}
-
 
 def global_emit(event, data):
     global emit_times
@@ -135,7 +109,6 @@ def global_emit(event, data):
     except Exception as e:
         print(e)
         pass
-
 
 def sync_dir():
     seconds = 24 * 60 * 60
@@ -160,7 +133,6 @@ def sync_dir():
         else:
             socketio.sleep(seconds)
 
-
 __dict = {0: 2, 1:1, 10: 0}
 def transform_id(id_detect):
     global __dict
@@ -178,249 +150,13 @@ def transform_id(id_detect):
     if str(old_class) in __dict:
         return __dict[str(old_class)]
     return __dict.get(old_class, old_class)
-
-
+    
 def calc_avg(calc_ids):
     if calc_ids is None or len(calc_ids) == 0:
         return -1
-    
-    # Sử dụng bỏ phiếu đa số (Majority Voting / Mode) thay vì tính trung bình cộng số học
     counts = Counter(calc_ids)
     most_common_class, count = counts.most_common(1)[0]
     return most_common_class
-
-
-def open_camera(id_camera):
-    camera = cv2.VideoCapture(id_camera)
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-    return camera
-
-
-class InferenceWorker(threading.Thread):
-    def __init__(self, in_queue, out_queue):
-        super().__init__()
-        self.in_queue = in_queue
-        self.out_queue = out_queue
-        self.daemon = True
-
-        self.__path = config.YOLO_DET_MODEL_PATH
-        self.detector = YOLO(self.__path)
-        self.tracker = Tracker()
-        
-        self._stop_event = threading.Event()
-        self.reset_tracker_flag = False
-
-    def stop(self):
-        self._stop_event.set()
-
-    def request_tracker_reset(self):
-        self.reset_tracker_flag = True
-        
-    def run(self):
-        global CAMERAS
-        while not self._stop_event.is_set():
-            try:
-                data = self.in_queue.get(timeout=0.1)
-                if data is None:
-                    break
-                frame_curr, current_detext, start_time = data
-                
-                if self.reset_tracker_flag:
-                    self.tracker.reset()
-                    self.reset_tracker_flag = False
-                
-                # Lật gương ảnh ở luồng phụ thay vì luồng chính để tiết kiệm tài nguyên CPU
-                frame_curr = cv2.flip(frame_curr, 1)
-                img = frame_curr.copy()
-                
-                valid_boxes = []
-                
-                results = self.detector(img, conf=config.YOLO_CONF_DET, agnostic_nms=True, iou=config.YOLO_IOU_DET, verbose=False)
-                
-                detections = []
-                if results[0].boxes.shape[0] > 0:
-                    boxes = results[0].boxes
-                    for i in range(boxes.shape[0]):
-                        boxx = boxes[i]
-                        a = boxx.xyxy
-                        
-                        x1 = int(a[0, 0])
-                        y1 = int(a[0, 1])
-                        x2 = int(a[0, 2])
-                        y2 = int(a[0, 3])
-                        
-                        if x1 < CAMERAS[1] or y1 < CAMERAS[2]:
-                            continue
-                        
-                        score = float(boxx.conf[0])
-                        idx_class = int(boxx.cls[0])
-                        
-                        # Chỉ phát hiện và bám vết các lớp 0, 1, 2 và lớp bàn tay 5
-                        if idx_class not in [0, 1, 2, 5]:
-                            continue
-                        
-                        detections.append([x1, y1, x2, y2, idx_class, score])
-                
-                self.tracker.update(img, detections)
-                
-                for track in self.tracker.tracks:
-                    bbox = track.bbox
-                    track_id = track.track_id
-                    valid_boxes.append((bbox, track.id, track.confidence, track_id))
-                
-                if len(valid_boxes) > 0:
-                    valid_boxes.sort(key=lambda c: (c[0][2] - c[0][0]) * (c[0][3] - c[0][1]), reverse=True)
-                    
-                if not self._stop_event.is_set():
-                    self.out_queue.put((frame_curr, valid_boxes, start_time))
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"Worker Error: {e}")
-
-
-class ClassifierWorker(threading.Thread):
-    def __init__(self, in_queue, out_queue):
-        super().__init__()
-        self.in_queue = in_queue
-        self.out_queue = out_queue
-        self.daemon = True
-
-        # Tải database đặc trưng tiêu chuẩn (PC)
-        db_path = config.DATABASE_EMBEDDING_PC
-        self.classifier = TripletClassifier(
-            model_path=config.TRIPLET_MODEL_PATH,
-            database_path=str(db_path)
-        )
-        
-        # --- Khởi tạo mô hình phân loại nhị phân PyTorch cho Thủy tinh Lanh dùng mô-đun riêng ---
-        if hasattr(config, "DEVICE") and config.DEVICE:
-            self.device = torch.device(config.DEVICE)
-        else:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
-            
-        self.glass_classifier = GlassClassifier(
-            model_path=config.GLASS_MODEL_PATH,
-            device=self.device,
-            conf_thres=config.GLASS_CONF_THRESHOLD
-        )
-        
-        self.track_embeddings = {}
-        self.voting_history = {}
-        self.VOTING_WINDOW = config.VOTING_WINDOW_CLASSIFIER
-        self._stop_event = threading.Event()
-
-    def stop(self):
-        self._stop_event.set()
-
-    def _get_voted_class(self, track_id, current_pred, current_score):
-        if track_id not in self.voting_history:
-            self.voting_history[track_id] = deque(maxlen=self.VOTING_WINDOW)
-        self.voting_history[track_id].append(current_pred)
-        counts = Counter(self.voting_history[track_id])
-        return counts.most_common(1)[0][0], current_score
-
-    def run(self):
-        while not self._stop_event.is_set():
-            try:
-                task = self.in_queue.get(timeout=0.1)
-                if task is None:
-                    break
-                
-                task_type = task[0]
-                if task_type == "classify":
-                    _, _id, crop, db_type = task
-                    try:
-                        if db_type == "special":
-                            # --- PHÂN LOẠI NHỊ PHÂN CHO THỦY TINH CLASS 2 DÙNG MODULE RIÊNG ---
-                            pred_class, p_score = self.glass_classifier.predict(crop)
-                            
-                            # Đưa qua bộ lọc bỏ phiếu Sliding Window để tối ưu hóa quyết định
-                            v_class, v_score = self._get_voted_class(_id, pred_class, p_score)
-                            self.out_queue.put((_id, v_class, v_score))
-                        else:
-                            # --- PHÂN LOẠI TRUYỀN THỐNG DÙNG TRIPLET CHO CHAI NHỰA/LON ---
-                            embs = self.classifier.extract_batch([crop])
-                            if embs.size > 0:
-                                emb = embs[0]
-                                norm = np.linalg.norm(emb)
-                                emb_norm = emb / norm if norm > 0 else emb
-
-                                # Làm mượt embedding qua thời gian (EMA) để chống rung/flickering
-                                if _id not in self.track_embeddings:
-                                    self.track_embeddings[_id] = emb_norm
-                                else:
-                                    alpha = config.EMA_SMOOTHING_ALPHA  # Hệ số làm mượt
-                                    smoothed = alpha * self.track_embeddings[_id] + (1.0 - alpha) * emb_norm
-                                    smoothed_norm = np.linalg.norm(smoothed)
-                                    self.track_embeddings[_id] = smoothed / smoothed_norm if smoothed_norm > 0 else smoothed
-
-                                # Phân loại dựa trên vector đã được làm mượt
-                                preds = self.classifier.predict_embeddings([self.track_embeddings[_id]],
-                                                                            threshold=config.SIM_THRESHOLD, 
-                                                                            margin_thres=config.MARGIN_THRESHOLD,
-                                                                            outlier_floor=config.OUTLIER_RADIUS_FLOOR)
-                                pred_class, p_score = preds[0]
-
-                                # Đưa qua bộ lọc bỏ phiếu Sliding Window để tối ưu hóa quyết định
-                                v_class, v_score = self._get_voted_class(_id, pred_class, p_score)
-                                self.out_queue.put((_id, v_class, v_score))
-                    except Exception as e:
-                        print(f"Classifier Error for ID {_id}: {e}")
-
-                elif task_type == "cleanup":
-                    _, active_ids = task
-                    # Dọn dẹp cache của các track không hoạt động
-                    for cache_dict in (self.track_embeddings, self.voting_history):
-                        inactive_keys = cache_dict.keys() - active_ids
-                        for k in inactive_keys:
-                            if k in cache_dict:
-                                del cache_dict[k]
-
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"ClassifierWorker Error: {e}")
-
-
-def _evaluate_hierarchical_class(box, shape, roi_coords, volume_cache, track_cache):
-    """
-    Đánh giá phân lớp theo logic phân tầng (Hierarchical Decision Logic V2).
-    Trả về: (final_class, is_unknown_class2)
-    """
-    bbox, idx_class, conf, _id = box
-    x1, y1, x2, y2 = map(int, bbox)
-    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-    
-    roi_x1, roi_y1, roi_x2, roi_y2 = roi_coords
-    final_class = 7  # Mặc định là INVALID (7)
-    is_unknown_class2 = False
-    
-    if roi_x1 < cx < roi_x2 and roi_y1 < cy < roi_y2:
-        current_vol = volume_cache.get(_id, -1)
-        # Bước 1: Kiểm tra Thể tích
-        if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME:
-            if idx_class == 0:
-                final_class = 2  # Lon
-            elif idx_class == 1:
-                # Chai nhựa
-                final_class = 1
-            elif idx_class == 2:
-                # Chai thủy tinh (phân lớp nhờ CNN nhị phân)
-                if _id in track_cache:
-                    brand, b_score = track_cache[_id]
-                    if brand.lower() == "lanh":
-                        final_class = 1  # valid class
-                    else:
-                        is_unknown_class2 = True
-                else:
-                    # Gán tạm nhãn 1 trong khi luồng ClassifierWorker tính toán dự đoán
-                    final_class = 1
-    
-    return final_class, is_unknown_class2
-
 
 def run():
     global detext, beginTime, flag_camera, detection_armed
@@ -658,7 +394,7 @@ def run():
                             sizes.append(max((y2 - y1) / shape[0] * 100, (x2 - x1) / shape[1] * 100))
                             
                             # --- HIERARCHICAL DECISION LOGIC V2 ---
-                            final_class, is_unknown_class2 = _evaluate_hierarchical_class(box, shape, config.ROI_COORDS, volume_cache, track_cache)
+                            final_class, is_unknown_class2 = evaluate_hierarchical_class(box, volume_cache, track_cache, config.ROI_COORDS)
                             
                             if is_unknown_class2:
                                 print("--- Unknown brand detected for class 2. Terminating detection immediately! ---")
@@ -723,7 +459,6 @@ def run_detect(data):
     if "transform" in data:
         __dict = data["transform"]
         print(__dict, transform_id(4))
-        # print("Ignore legacy transform:", data["transform"])
 
     if "detext" in data:
         if data["detext"]:

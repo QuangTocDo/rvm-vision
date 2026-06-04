@@ -1,0 +1,12 @@
+lapx
+tensorflow
+pandas>=1.1.4
+seaborn>=0.11.0
+flask
+flask_socketio
+flask-cors
+gevent-websocket
+eventlet
+tqdm
+# supervision[desktop]
+yaml

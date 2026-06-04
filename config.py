@@ -29,16 +29,20 @@ PROJECT_ROOT = FILE.parents[1]
 WEIGHTS_DIR = PROJECT_ROOT / "best_weights"
 DATABASE_DIR = PROJECT_ROOT / "best_embeddings"
 
+# WEIGHTS_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/weights"
+# DATABASE_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/database"
+
 YOLO_DET_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_13thg5.onnx"
 YOLO_DET_MODEL_PATH  = WEIGHTS_DIR / "best.pt"
 YOLO_OBB_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_obb26thg3.onnx"
 TRIPLET_MODEL_ONNX_PATH= WEIGHTS_DIR / "model.onnx"
 TRIPLET_MODEL_PATH= WEIGHTS_DIR / "mbnv2_embedding19thg3.pth"
+TRIPLET_MODEL_PATH_GLASS= WEIGHTS_DIR / "best_embedding_glass.pth"
 GLASS_MODEL_PATH = WEIGHTS_DIR / "best_binary_classifier.pth"
 
 DATABASE_EMBEDDING_PATH = DATABASE_DIR / "brand_database.npz"
 DATABASE_EMBEDDING_PC = DATABASE_DIR / "brand_database_pc.npz"
-# DATABASE_EMBEDDING_G = DATABASE_DIR / "brand_database_g.npz"
+DATABASE_EMBEDDING_G = DATABASE_DIR / "brand_database_g.npz"
 
 # ===== YOLO CONFIG =====
 # YOLO_CONF_OBB = 0.7
@@ -50,8 +54,7 @@ SIM_THRESHOLD = 0.85
 MARGIN_THRESHOLD = 0.06
 OUTLIER_RADIUS_FLOOR = 0.15  # Ngưỡng sàn tối thiểu cho bán kính Outlier (tương đương Cosine Sim >= 0.85)
 # ===== DEVICE =====
-# DEVICE = "cuda:0"
-DEVICE = "mps"
+DEVICE = "cpu"
 
 # ===== CAMERA =====
 CAMERA_INDEX = 0
@@ -81,7 +84,7 @@ BRAND_COLORS = {
 PIXEL_TO_CM_RATIO = 0.05
 VOLUME_SCALING_UP = 1.18
 VOLUME_SCALING_DOWN = 0.99
-MIN_ACCEPTABLE_VOLUME = 220
+MIN_ACCEPTABLE_VOLUME = 190
 MAX_ACCEPTABLE_VOLUME = 550
 
 # ===== SLIDING WINDOW & VOTING =====
