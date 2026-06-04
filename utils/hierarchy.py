@@ -20,8 +20,11 @@ def evaluate_hierarchical_class(box, volume_cache, track_cache, roi_coords):
             if idx_class == 0:
                 final_class = 2  # Lon
             elif idx_class == 1:
-                # Chai nhựa
-                final_class = 1
+                brand, b_score = track_cache.get(_id, ("unknown", 0.0))
+                if brand.lower() == "aquafina":
+                    final_class = 0
+                else:
+                    final_class = 1
             elif idx_class == 2:
                 # Chai thủy tinh (phân lớp nhờ CNN nhị phân hoặc Triplet)
                 if _id in track_cache:

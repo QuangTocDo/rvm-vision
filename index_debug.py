@@ -60,23 +60,13 @@ def average(lst):
         return 0
     return sum(lst) / len(lst)
 
-__dict = {0: 2, 1: 1 , 10: 0}
+__dict = {0: 0, 1:1 , 2: 2, 3:2, 4:2, 5:2}
 
 def transform_id(id_detect):
     global __dict
-    if id_detect == 0:
-        old_class = 2
-    elif id_detect == 1:
-        old_class = 1
-    else:
-        old_class = id_detect
-        
     if __dict is None:
-        return old_class
-    
-    if str(old_class) in __dict:
-        return __dict[str(old_class)]
-    return __dict.get(old_class, old_class)
+        return id_detect
+    return __dict.get(str(id_detect), id_detect)
 
 def calc_avg(calc_ids):
     if calc_ids is None or len(calc_ids) == 0:
