@@ -60,12 +60,11 @@ class InferenceWorker(threading.Thread):
                 
                 start_proc = time.time()
                 frame_curr = cv2.flip(frame_curr, 1)
-                img = frame_curr.copy()
                 
                 valid_boxes = []
                 
                 # --- 1. CHẠY YOLO (.PT) ---
-                results = self.detector(img, conf=config.YOLO_CONF_DET, agnostic_nms=True, iou=config.YOLO_IOU_DET, verbose=False)
+                results = self.detector(frame_curr, conf=config.YOLO_CONF_DET, agnostic_nms=True, iou=config.YOLO_IOU_DET, verbose=False)
                 
                 detections = []
                 if results[0].boxes.shape[0] > 0:
@@ -92,7 +91,7 @@ class InferenceWorker(threading.Thread):
                         detections.append([x1, y1, x2, y2, idx_class, score])
                 
                 # --- 2. TRACKING ---
-                self.tracker.update(img, detections)
+                self.tracker.update(frame_curr, detections)
                 
                 for track in self.tracker.tracks:
                     bbox = track.bbox

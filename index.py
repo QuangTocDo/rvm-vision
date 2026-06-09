@@ -2,15 +2,12 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 import time
-import math
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 import threading
 import queue
-import cv2
 import numpy as np
-import torch
 # pyrefly: ignore [missing-import]
 from flask import Flask, render_template
 from flask_cors import CORS
@@ -104,6 +101,8 @@ if not os.path.exists(_dir):
 detext = False
 flag_camera = False
 detection_armed = False # Trạng thái chờ (armed)
+flag_camera_start_time = None
+arm_start_time = None
 
 def average(lst):
     if lst == None or len(lst) == 0:
@@ -185,6 +184,11 @@ def reconnect_camera_async():
             camera_ii = FindCamera()
             if camera_ii >= 0:
                 with cache_lock:
+                    if camera is not None:
+                        try:
+                            camera.release()
+                        except Exception as e:
+                            logger.error(f"Error releasing camera: {e}")
                     camera = open_camera(camera_ii)
                 logger.info(f"Kết nối lại thành công camera tại index: {camera_ii}")
                 break
@@ -195,6 +199,7 @@ def reconnect_camera_async():
 
 def run():
     global detext, beginTime, flag_camera, detection_armed, camera
+    global flag_camera_start_time, arm_start_time
     
     __path = config.YOLO_DET_MODEL_PATH
     logger.info(f"INIT AI CORE WITH HIERARCHICAL ROUTING V2 {__path}")
@@ -228,6 +233,10 @@ def run():
     # Caches cho Classifier
     track_cache = {}
     track_age_cls = {}
+    
+    # Lịch sử tọa độ tâm cx để phát hiện crossing virtual line
+    track_history = {}
+    triggered_ids = set()
     
     # Cửa sổ trượt lưu lịch sử phát hiện trong ROI (Sliding Window Filter)
     roi_sliding_windows = {}
@@ -275,65 +284,72 @@ def run():
             # --- TÍNH TOÁN VÀ ĐỒNG BỘ CÁC BỘ ĐỆM CHO TẤT CẢ VẬT THỂ ĐANG ĐƯỢC BÁM VẾT ---
             active_ids = {box[3] for box in valid_boxes}
             with cache_lock:
-                for cache_dict in (volume_cache, track_age_vol, track_cache, track_age_cls, roi_sliding_windows):
+                for cache_dict in (volume_cache, track_age_vol, track_cache, track_age_cls, roi_sliding_windows, track_history):
                     inactive_keys = cache_dict.keys() - active_ids
                     for k in inactive_keys:
                         if k in cache_dict:
                             del cache_dict[k]
+                triggered_ids &= active_ids
             
             # Gửi yêu cầu dọn dẹp sang ClassifierWorker
-            if not cls_in_queue.full():
-                cls_in_queue.put(("cleanup", active_ids))
+            try:
+                cls_in_queue.put(("cleanup", active_ids), block=False)
+            except queue.Full:
+                pass
 
             detected_in_roi_this_frame = { _id: False for _id in active_ids }
+            classify_tasks = []
 
-            for box in valid_boxes:
-                bbox, idx_class, conf, _id = box
-                if idx_class not in [0, 1, 2]:
-                    continue
-                x1, y1, x2, y2 = map(int, bbox)
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
+            with cache_lock:
+                for box in valid_boxes:
+                    bbox, idx_class, conf, _id = box
+                    if idx_class not in [0, 1, 2, 4]:
+                        continue
+                    x1, y1, x2, y2 = map(int, bbox)
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
 
-                if roi_x1 < cx < roi_x2 and roi_y1 < cy < roi_y2:
-                    detected_in_roi_this_frame[_id] = True
-                    
-                    # 1. Đo thể tích vật thể
-                    with cache_lock:
+                    if roi_x1 < cx < roi_x2 and roi_y1 < cy < roi_y2:
+                        detected_in_roi_this_frame[_id] = True
+                        
+                        # 1. Đo thể tích vật thể
                         track_age_vol[_id] = track_age_vol.get(_id, 0) + 1
                         is_vol_calc_frame = (track_age_vol[_id] == 1 or track_age_vol[_id] % config.CLASSIFY_INTERVAL == 0)
-                    if is_vol_calc_frame:
-                        w_box, h_box = x2 - x1, y2 - y1
-                        length_px, diameter_px = max(w_box, h_box), min(w_box, h_box)
-                        if length_px < 300:
-                            vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_UP)
-                        elif length_px > 700:
-                            vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_DOWN)
-                        else:
-                            vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, 1)
-                        with cache_lock:
+                        if is_vol_calc_frame:
+                            w_box, h_box = x2 - x1, y2 - y1
+                            length_px, diameter_px = max(w_box, h_box), min(w_box, h_box)
+                            if length_px < 300:
+                                vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_UP)
+                            elif length_px > 700:
+                                vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, config.VOLUME_SCALING_DOWN)
+                            else:
+                                vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, 1)
                             volume_cache[_id] = vol
-                    # 2. Nhận diện thương hiệu (chỉ khi thể tích hợp lệ và idx_class thuộc [0, 1, 2])
-                    with cache_lock:
+                        
+                        # 2. Nhận diện thương hiệu (chỉ khi thể tích hợp lệ và idx_class thuộc [0, 1, 2, 4])
                         current_vol = volume_cache.get(_id, -1)
-                    if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME and idx_class in [0, 1, 2]:
-                        with cache_lock:
+                        if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME and idx_class in [0, 1, 2, 4]:
                             track_age_cls[_id] = track_age_cls.get(_id, 0) + 1
                             is_cls_calc_frame = (track_age_cls[_id] == 1 or track_age_cls[_id] % config.CLASSIFY_INTERVAL == 0)
-                        if is_cls_calc_frame:
-                            crop = crop_from_box(processed_frame, bbox)
-                            if crop is not None and crop.size > 0:
-                                if not cls_in_queue.full():
+                            if is_cls_calc_frame:
+                                crop = crop_from_box(processed_frame, bbox)
+                                if crop is not None and crop.size > 0:
                                     db_type = "special" if idx_class == 2 else "standard"
-                                    cls_in_queue.put(("classify", _id, crop, db_type))
+                                    classify_tasks.append((_id, crop, db_type))
 
-            # Cập nhật Cửa sổ trượt cho tất cả các ID đang hoạt động
-            with cache_lock:
+                # Cập nhật Cửa sổ trượt cho tất cả các ID đang hoạt động
                 for _id in active_ids:
                     if _id not in roi_sliding_windows:
                         roi_sliding_windows[_id] = deque(maxlen=SLIDING_WINDOW_SIZE)
                     is_detected = detected_in_roi_this_frame.get(_id, False)
                     roi_sliding_windows[_id].append(1 if is_detected else 0)
+
+            # Đẩy các tác vụ phân loại vào queue ngoài lock để tránh giữ lock quá lâu
+            for t_id, crop, db_type in classify_tasks:
+                try:
+                    cls_in_queue.put(("classify", t_id, crop, db_type), block=False)
+                except queue.Full:
+                    logger.warning("Classifier Queue is full, skipping classification frame.")
 
             # --- KIỂM TRA SỰ XUẤT HIỆN CỦA TAY TRONG VÙNG ROI ---
             is_hand_in_roi = False
@@ -353,6 +369,12 @@ def run():
                     bbox, idx_class, conf, _id = box
                     if idx_class == 5:
                         continue  # Bỏ qua tay khi lọc chai
+                    
+                    # Nếu đang trong quá trình detect ID này, không lọc bỏ để tiếp tục thu thập sample đánh giá volume/class
+                    if detext and _id == id:
+                        decision_boxes.append(box)
+                        continue
+                        
                     vol = volume_cache.get(_id, -1)
                     if vol != -1 and not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
                         continue
@@ -370,24 +392,60 @@ def run():
                         is_object_in_roi = True
                         break
 
-            # --- TỰ ĐỘNG KÍCH HOẠT NHẬN DIỆN QUA CỬA SỔ TRƯỢT ---
-            is_stable = False
-            if detection_armed and is_object_in_roi and not detext and not is_hand_in_roi:
-                for box in decision_boxes:
-                    _id = box[3]
-                    window = roi_sliding_windows.get(_id, [])
-                    if len(window) >= config.MIN_SAMPLES_ROI_CHECK:
-                        density = sum(window) / len(window)
-                        if density >= config.ROI_STABILITY_THRESHOLD:
-                            is_stable = True
-                            break
-            
-            if is_stable:
-                logger.info(f"ARMED and object is stable in ROI (Sliding Window >= {int(config.ROI_STABILITY_THRESHOLD * 100)}%). Triggering detection.")
-                detext = True
-                beginTime = time.time()
-                detection_armed = False
-                global_emit('auto_trigger', {'triggered': True})
+            # --- CẬP NHẬT QUỸ ĐẠO VÀ KIỂM TRA VƯỢT VẠCH ẢO ---
+            virtual_line_y = roi_y2 - (roi_y2 - roi_y1) // 3
+            trigger_this_frame = False
+            triggered_id = -1
+            is_trigger_invalid_volume = False
+            invalid_volume_val = -1
+
+            with cache_lock:
+                for box in valid_boxes:  # Duyệt trên valid_boxes thay vì decision_boxes
+                    bbox, idx_class, conf, _id = box
+                    if idx_class == 5:
+                        continue  # Bỏ qua tay
+                    
+                    x1, y1, x2, y2 = map(int, bbox)
+                    cy = (y1 + y2) // 2
+                    
+                    if _id not in track_history:
+                        track_history[_id] = deque(maxlen=5)
+                    track_history[_id].append(cy)
+                    
+                    is_above_now = cy <= virtual_line_y
+                    is_box_complete = y2 < roi_y2 + 15
+                    
+                    if is_above_now and is_box_complete and (_id not in triggered_ids):
+                        vol = volume_cache.get(_id, -1)
+                        if vol != -1:  # Đã có số đo thể tích
+                            if not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
+                                is_trigger_invalid_volume = True
+                                invalid_volume_val = vol
+                            
+                            trigger_this_frame = True
+                            triggered_id = _id
+
+            # --- TỰ ĐỘNG KÍCH HOẠT HOẶC TỪ CHỐI NGAY LẬP TỨC ---
+            if detection_armed and trigger_this_frame and not detext and not is_hand_in_roi:
+                if is_trigger_invalid_volume:
+                    logger.info(f"ARMED and object {triggered_id} crossed virtual line with INVALID volume ({invalid_volume_val:.1f}ml). Rejecting immediately!")
+                    global_emit('result', {'data': 7, 'model': str(__path), 'ver': CODE,
+                                           "id": mac_add, "images": [], "size": 0, "item": triggered_id,
+                                           "volume": float(invalid_volume_val)})
+                    with open("log.txt", "a", encoding="utf-8") as f:
+                        f.write(f"{datetime.now()} | data=7 | id={mac_add} | images=[] | size=0 | item={triggered_id} | volume={invalid_volume_val:.1f} | (Rejected: Volume out of bounds)\n")
+                    
+                    triggered_ids.add(triggered_id)
+                    detection_armed = False
+                    arm_start_time = None
+                else:
+                    logger.info(f"ARMED and object {triggered_id} crossed virtual line. Triggering detection.")
+                    detext = True
+                    beginTime = time.time()
+                    detection_armed = False
+                    id = triggered_id
+                    triggered_ids.add(triggered_id)
+                    global_emit('auto_trigger', {'triggered': True})
 
             frameCount += 1
             shape = processed_frame.shape
@@ -405,6 +463,8 @@ def run():
                 global_emit('result', {'data': -1, 'model': str(__path), 'ver': CODE,
                                        "id": mac_add, "images": images, "size": 0, "item": -1,
                                        "volume": 0.0})
+                with open("log.txt", "a", encoding="utf-8") as f:
+                    f.write(f"{datetime.now()} | data=-1 | id={mac_add} | images={images} | size=0 | item=-1 | volume=0.0 | (Hand safety abort)\n")
                 global_emit('command', 0)
                 detext = False
                 final_result = 0
@@ -421,11 +481,12 @@ def run():
                         avg = calc_avg(calc_ids) if ii > 0 else -1
                         with cache_lock:
                             vol_val = float(volume_cache.get(id, -1))
+                        size_val = average(sizes) if sizes else 0
                         global_emit('result', {'data': avg, 'model': str(__path), 'ver': CODE,
-                                               "id": mac_add, "images": images, "size": average(sizes) if sizes else 0, "item": id,
+                                               "id": mac_add, "images": images, "size": size_val, "item": id,
                                                "volume": vol_val})
                         with open("log.txt", "a", encoding="utf-8") as f:
-                            f.write(f"{datetime.now()} | data={avg} | id={mac_add} | images={images} | size={average(sizes) if sizes else 0} | item={id} | volume={vol_val}\n")
+                            f.write(f"{datetime.now()} | data={avg} | id={mac_add} | images={images} | size={size_val:.2f} | item={id} | volume={vol_val:.1f}\n")
                         detext = False
                         final_result = 0
                         images, sizes, calc_ids, id = [], [], [], -1
@@ -447,9 +508,12 @@ def run():
                                 logger.info("--- Unknown brand detected for class 2. Terminating detection immediately! ---")
                                 with cache_lock:
                                     vol_val = float(volume_cache.get(id, -1))
+                                size_val = average(sizes) if sizes else 0
                                 global_emit('result', {'data': 7, 'model': str(__path), 'ver': CODE,
-                                            "id": mac_add, "images": images, "size": average(sizes) if sizes else 0, "item": id,
+                                            "id": mac_add, "images": images, "size": size_val, "item": id,
                                             "volume": vol_val})
+                                with open("log.txt", "a", encoding="utf-8") as f:
+                                    f.write(f"{datetime.now()} | data=7 | id={mac_add} | images={images} | size={size_val:.2f} | item={id} | volume={vol_val:.1f} | (Unknown brand class 2)\n")
                                 global_emit('command', 0)
                                 detext = False
                                 final_result = 0
@@ -481,9 +545,11 @@ def run():
 
         except queue.Empty:
             pass
-            
-        if not in_queue.full():
-            in_queue.put((im, detext, next_start_time))
+
+        try:
+            in_queue.put((im, detext, next_start_time), block=False)
+        except queue.Full:
+            pass
 
         if frameCount > 99999: frameCount = 0
         socketio.sleep(0.01)
@@ -504,6 +570,7 @@ def my_event(message):
 @socketio.event
 def run_detect(data):
     global detext, beginTime, flag_camera, __dict, detection_armed
+    global flag_camera_start_time, arm_start_time
     logger.info(f"run_detect: {data} | time since begin: {time.time() - beginTime:.4f}s | current: {time.time()}")
     try:
         with open("ui_payload_log.txt", "a", encoding="utf-8") as f:
@@ -520,13 +587,19 @@ def run_detect(data):
             if not detext and not detection_armed:
                 logger.info("Arming for detection...")
                 detection_armed = True
+                arm_start_time = time.time()
         else:
             detext = False
             detection_armed = False
+            arm_start_time = None
             logger.info("Detection cancelled by user.")
 
     if "camera" in data:
         flag_camera = data["camera"]
+        if flag_camera:
+            flag_camera_start_time = time.time()
+        else:
+            flag_camera_start_time = None
 
 
 @app.route('/camera')

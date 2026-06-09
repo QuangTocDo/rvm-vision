@@ -114,6 +114,10 @@ class RealtimeDevPipeline:
         self.track_cache = {}
         self.track_age_cls = {}
         
+        # Lịch sử tâm cx của từng ID bám vết
+        self.track_history = {}
+        self.triggered_ids = set()
+        
         # Cửa sổ trượt lưu lịch sử phát hiện trong ROI của từng ID (Sliding Window Filter)
         self.roi_sliding_windows = {}
         self.SLIDING_WINDOW_SIZE = config.SLIDING_WINDOW_ROI
@@ -196,11 +200,12 @@ class RealtimeDevPipeline:
                 # --- TÍNH TOÁN VÀ ĐỒNG BỘ AI CHO TẤT CẢ VẬT THỂ ĐANG ĐƯỢC BÁM VẾT ---
                 active_ids = {box[3] for box in valid_boxes}
                 with self.cache_lock:
-                    for cache_dict in (self.track_cache, self.track_age_cls, self.volume_cache, self.track_age_vol, self.roi_sliding_windows):
+                    for cache_dict in (self.track_cache, self.track_age_cls, self.volume_cache, self.track_age_vol, self.roi_sliding_windows, self.track_history):
                         inactive_keys = cache_dict.keys() - active_ids
                         for k in inactive_keys:
                             if k in cache_dict:
                                 del cache_dict[k]
+                    self.triggered_ids &= active_ids
                 
                 # Gửi yêu cầu dọn dẹp sang ClassifierWorker
                 if not self.cls_in_queue.full():
@@ -269,6 +274,12 @@ class RealtimeDevPipeline:
                         bbox, idx_class, conf, _id = box
                         if idx_class == 5:
                             continue  # Bỏ qua tay khi lọc chai
+                        
+                        # Nếu đang trong quá trình detect ID này, không lọc bỏ để tiếp tục thu thập sample đánh giá volume/class
+                        if detext and _id == id:
+                            decision_boxes.append(box)
+                            continue
+                            
                         vol = self.volume_cache.get(_id, -1)
                         if vol != -1 and not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
                             continue
@@ -339,22 +350,57 @@ class RealtimeDevPipeline:
                     detection_armed = True
                     logger.info("\n--- System re-armed due to Hand safety trigger. ---")
 
-                elif detection_armed and is_object_in_roi and not detext and not is_hand_in_roi:
-                    is_stable = False
-                    with self.cache_lock:
-                        for box in decision_boxes:
-                            _id = box[3]
-                            window = self.roi_sliding_windows.get(_id, [])
-                            if len(window) >= config.MIN_SAMPLES_ROI_CHECK:
-                                density = sum(window) / len(window)
-                                if density >= config.ROI_STABILITY_THRESHOLD: 
-                                    is_stable = True
-                                    break
-                    if is_stable:
-                        logger.info(f"--- Object is stable in ROI (sliding window density >= {int(config.ROI_STABILITY_THRESHOLD * 100)}%). Triggering detection! ---")
+                # --- CẬP NHẬT QUỸ ĐẠO VÀ KIỂM TRA VƯỢT VẠCH ẢO ---
+                virtual_line_y = self.roi_y2 - (self.roi_y2 - self.roi_y1) // 3
+                trigger_this_frame = False
+                triggered_id = -1
+                is_trigger_invalid_volume = False
+                invalid_volume_val = -1
+
+                with self.cache_lock:
+                    for box in valid_boxes:  # Duyệt trên valid_boxes thay vì decision_boxes
+                        bbox, idx_class, conf, _id = box
+                        if idx_class == 5:
+                            continue  # Bỏ qua tay
+                        
+                        x1, y1, x2, y2 = map(int, bbox)
+                        cy = (y1 + y2) // 2
+                        
+                        if _id not in self.track_history:
+                            self.track_history[_id] = deque(maxlen=5)
+                        self.track_history[_id].append(cy)
+                        
+                        is_above_now = cy <= virtual_line_y
+                        is_box_complete = y2 < self.roi_y2 + 15
+                        
+                        if is_above_now and is_box_complete and (_id not in self.triggered_ids):
+                            vol = self.volume_cache.get(_id, -1)
+                            if vol != -1:  # Đã có số đo thể tích
+                                if not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
+                                    is_trigger_invalid_volume = True
+                                    invalid_volume_val = vol
+                                
+                                trigger_this_frame = True
+                                triggered_id = _id
+
+                # --- TỰ ĐỘNG KÍCH HOẠT HOẶC TỪ CHỐI NGAY LẬP TỨC ---
+                if detection_armed and trigger_this_frame and not detext and not is_hand_in_roi:
+                    if is_trigger_invalid_volume:
+                        logger.info(f"ARMED and object {triggered_id} crossed virtual line with INVALID volume ({invalid_volume_val:.1f}ml). Rejecting immediately!")
+                        global_emit('result', {'data': 7, 'model': str(self.__path), 'ver': CODE,
+                                               "id": mac_add, "images": "mock_images", "size": 0, "item": triggered_id,
+                                               "volume": float(invalid_volume_val)})
+                        with open("log.txt", "a", encoding="utf-8") as f:
+                            f.write(f"{datetime.now()} | data=7 | id={mac_add} | images=[] | size=0 | item={triggered_id} | volume={invalid_volume_val:.1f} | (Rejected: Volume out of bounds)\n")
+                        
+                        self.triggered_ids.add(triggered_id)
+                    else:
+                        logger.info(f"--- Object {triggered_id} crossed virtual line {virtual_line_y}. Triggering detection! ---")
                         detext = True
                         beginTime = time.time()
                         detection_armed = False
+                        id = triggered_id
+                        self.triggered_ids.add(triggered_id)
 
                 if detext:
                     if frameCount % 4 != 0 or frameCount < 4:
