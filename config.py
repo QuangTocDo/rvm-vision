@@ -33,7 +33,7 @@ WEIGHTS_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/weights"
 DATABASE_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/database"
 
 YOLO_DET_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_13thg5.onnx"
-YOLO_DET_MODEL_PATH  = WEIGHTS_DIR / "best.pt"
+YOLO_DET_MODEL_PATH  = WEIGHTS_DIR / "best_12thg6.pt"
 YOLO_OBB_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_obb26thg3.onnx"
 TRIPLET_MODEL_ONNX_PATH= WEIGHTS_DIR / "model.onnx"
 TRIPLET_MODEL_PATH= WEIGHTS_DIR / "mbnv2_embedding19thg3.pth"
@@ -54,7 +54,7 @@ SIM_THRESHOLD = 0.85
 MARGIN_THRESHOLD = 0.06
 OUTLIER_RADIUS_FLOOR = 0.15  # Ngưỡng sàn tối thiểu cho bán kính Outlier (tương đương Cosine Sim >= 0.85)
 # ===== DEVICE =====
-DEVICE = "cpu"
+DEVICE = "mps"
 
 # ===== CAMERA =====
 CAMERA_INDEX = 0
@@ -84,7 +84,7 @@ BRAND_COLORS = {
 PIXEL_TO_CM_RATIO = 0.05
 VOLUME_SCALING_UP = 1.18
 VOLUME_SCALING_DOWN = 0.99
-MIN_ACCEPTABLE_VOLUME = 190
+MIN_ACCEPTABLE_VOLUME = 180
 MAX_ACCEPTABLE_VOLUME = 550
 
 # ===== SLIDING WINDOW & VOTING =====
@@ -95,7 +95,7 @@ ROI_STABILITY_THRESHOLD = 0.75    # Ngưỡng mật độ (> 75%) để coi là 
 
 # ===== INTERVALS & LIMITS =====
 DETECTION_TIMEOUT = 5             # Thời gian tối đa thu thập mẫu (giây) (beginTime - endTime > 5)
-MAX_DECISION_SAMPLES = 10         # Số lượng mẫu calc_ids tối đa cần thu thập để đưa ra kết luận
+MAX_DECISION_SAMPLES = 20         # Số lượng mẫu calc_ids tối đa cần thu thập để đưa ra kết luận
 EMA_SMOOTHING_ALPHA = 0.6         # Hệ số EMA làm mượt embedding
 
 # ===== ROI COORDINATES =====
@@ -111,3 +111,20 @@ FPS_ALPHA_CLASSIFIER = 0.2
 FPS_ALPHA_GUI = 0.1
 
 
+# ===== YOLO CLASS DEFINITIONS =====
+class YOLOClass:
+    CAN = 0
+    PLASTIC = 1
+    GLASS = 2
+    METAL_OTHER = 3
+    PLASTIC_OTHER = 4
+    HAND = 5
+
+# ===== RVM OUTPUT CLASS DEFINITIONS =====
+class RVMClass:
+    AQUAFINA = 0
+    STANDARD_PLASTIC = 1
+    CAN = 2
+    METAL_OTHER = 3
+    PLASTIC_OTHER = 4
+    REJECT = 7

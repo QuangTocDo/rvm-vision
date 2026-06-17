@@ -33,8 +33,6 @@ class InferenceWorker(threading.Thread):
         self.reset_tracker_flag = True
 
     def run(self):
-        # We access CAMERAS as a global in the parent script, but we can load from config or fallback
-        # Let's import CAMERAS from __main__ or use a fallback
         import __main__
         cameras = getattr(__main__, "CAMERAS", (-1, 0, 0, 640, 480))
         
@@ -84,13 +82,12 @@ class InferenceWorker(threading.Thread):
                         score = float(boxx.conf[0])
                         idx_class = int(boxx.cls[0])
                         
-                        # Lọc các lớp chai lọ 0, 1, 2, 4 và lớp bàn tay 5
-                        if idx_class not in [0, 1, 2, 4, 5]:
+                        if idx_class not in [config.YOLOClass.CAN, config.YOLOClass.PLASTIC, config.YOLOClass.GLASS, config.YOLOClass.PLASTIC_OTHER, config.YOLOClass.HAND]:
                             continue
-                            
+
                         detections.append([x1, y1, x2, y2, idx_class, score])
                 
-                # --- 2. TRACKING ---
+                # --- 2. TRACKING---
                 self.tracker.update(frame_curr, detections)
                 
                 for track in self.tracker.tracks:

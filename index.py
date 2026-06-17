@@ -303,7 +303,7 @@ def run():
             with cache_lock:
                 for box in valid_boxes:
                     bbox, idx_class, conf, _id = box
-                    if idx_class not in [0, 1, 2, 4]:
+                    if idx_class not in [config.YOLOClass.CAN, config.YOLOClass.PLASTIC, config.YOLOClass.GLASS, config.YOLOClass.PLASTIC_OTHER]:
                         continue
                     x1, y1, x2, y2 = map(int, bbox)
                     cx = (x1 + x2) // 2
@@ -326,15 +326,15 @@ def run():
                                 vol = estimate_volume(length_px, diameter_px, config.PIXEL_TO_CM_RATIO, 1)
                             volume_cache[_id] = vol
                         
-                        # 2. Nhận diện thương hiệu (chỉ khi thể tích hợp lệ và idx_class thuộc [0, 1, 2, 4])
+                        # 2. Nhận diện thương hiệu (chỉ khi thể tích hợp lệ và idx_class thuộc [config.YOLOClass.CAN, config.YOLOClass.PLASTIC, config.YOLOClass.GLASS, config.YOLOClass.PLASTIC_OTHER])
                         current_vol = volume_cache.get(_id, -1)
-                        if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME and idx_class in [0, 1, 2, 4]:
+                        if config.MIN_ACCEPTABLE_VOLUME < current_vol < config.MAX_ACCEPTABLE_VOLUME and idx_class in [config.YOLOClass.CAN, config.YOLOClass.PLASTIC, config.YOLOClass.GLASS, config.YOLOClass.PLASTIC_OTHER]:
                             track_age_cls[_id] = track_age_cls.get(_id, 0) + 1
                             is_cls_calc_frame = (track_age_cls[_id] == 1 or track_age_cls[_id] % config.CLASSIFY_INTERVAL == 0)
                             if is_cls_calc_frame:
                                 crop = crop_from_box(processed_frame, bbox)
                                 if crop is not None and crop.size > 0:
-                                    db_type = "special" if idx_class == 2 else "standard"
+                                    db_type = "special" if idx_class == config.YOLOClass.GLASS else "standard"
                                     classify_tasks.append((_id, crop, db_type))
 
                 # Cập nhật Cửa sổ trượt cho tất cả các ID đang hoạt động
@@ -355,7 +355,7 @@ def run():
             is_hand_in_roi = False
             for box in valid_boxes:
                 bbox, idx_class, conf, _id = box
-                if idx_class == 5:
+                if idx_class == config.YOLOClass.HAND:
                     cx = (bbox[0] + bbox[2]) // 2
                     cy = (bbox[1] + bbox[3]) // 2
                     if roi_x1 < cx < roi_x2 and roi_y1 < cy < roi_y2:
@@ -367,7 +367,7 @@ def run():
             with cache_lock:
                 for box in valid_boxes:
                     bbox, idx_class, conf, _id = box
-                    if idx_class == 5:
+                    if idx_class == config.YOLOClass.HAND:
                         continue  # Bỏ qua tay khi lọc chai
                     
                     # Nếu đang trong quá trình detect ID này, không lọc bỏ để tiếp tục thu thập sample đánh giá volume/class
@@ -402,7 +402,7 @@ def run():
             with cache_lock:
                 for box in valid_boxes:  # Duyệt trên valid_boxes thay vì decision_boxes
                     bbox, idx_class, conf, _id = box
-                    if idx_class == 5:
+                    if idx_class == config.YOLOClass.HAND:
                         continue  # Bỏ qua tay
                     
                     x1, y1, x2, y2 = map(int, bbox)
@@ -414,8 +414,9 @@ def run():
                     
                     is_above_now = cy <= virtual_line_y
                     is_box_complete = y2 < roi_y2 + 15
+                    track_age = track_age_vol.get(_id, 0)
                     
-                    if is_above_now and is_box_complete and (_id not in triggered_ids):
+                    if is_above_now and is_box_complete and (_id not in triggered_ids) and track_age >= 5:
                         vol = volume_cache.get(_id, -1)
                         if vol != -1:  # Đã có số đo thể tích
                             if not (config.MIN_ACCEPTABLE_VOLUME < vol < config.MAX_ACCEPTABLE_VOLUME):
@@ -429,11 +430,11 @@ def run():
             if detection_armed and trigger_this_frame and not detext and not is_hand_in_roi:
                 if is_trigger_invalid_volume:
                     logger.info(f"ARMED and object {triggered_id} crossed virtual line with INVALID volume ({invalid_volume_val:.1f}ml). Rejecting immediately!")
-                    global_emit('result', {'data': 7, 'model': str(__path), 'ver': CODE,
+                    global_emit('result', {'data': config.RVMClass.REJECT, 'model': str(__path), 'ver': CODE,
                                            "id": mac_add, "images": [], "size": 0, "item": triggered_id,
                                            "volume": float(invalid_volume_val)})
                     with open("log.txt", "a", encoding="utf-8") as f:
-                        f.write(f"{datetime.now()} | data=7 | id={mac_add} | images=[] | size=0 | item={triggered_id} | volume={invalid_volume_val:.1f} | (Rejected: Volume out of bounds)\n")
+                        f.write(f"{datetime.now()} | data={config.RVMClass.REJECT} | id={mac_add} | images=[] | size=0 | item={triggered_id} | volume={invalid_volume_val:.1f} | (Rejected: Volume out of bounds)\n")
                     
                     triggered_ids.add(triggered_id)
                     detection_armed = False
@@ -445,6 +446,10 @@ def run():
                     detection_armed = False
                     id = triggered_id
                     triggered_ids.add(triggered_id)
+                    with cache_lock:
+                        if triggered_id in track_cache:
+                            del track_cache[triggered_id]
+                        track_age_cls[triggered_id] = 0
                     global_emit('auto_trigger', {'triggered': True})
 
             frameCount += 1
@@ -509,11 +514,11 @@ def run():
                                 with cache_lock:
                                     vol_val = float(volume_cache.get(id, -1))
                                 size_val = average(sizes) if sizes else 0
-                                global_emit('result', {'data': 7, 'model': str(__path), 'ver': CODE,
+                                global_emit('result', {'data': config.RVMClass.REJECT, 'model': str(__path), 'ver': CODE,
                                             "id": mac_add, "images": images, "size": size_val, "item": id,
                                             "volume": vol_val})
                                 with open("log.txt", "a", encoding="utf-8") as f:
-                                    f.write(f"{datetime.now()} | data=7 | id={mac_add} | images={images} | size={size_val:.2f} | item={id} | volume={vol_val:.1f} | (Unknown brand class 2)\n")
+                                    f.write(f"{datetime.now()} | data={config.RVMClass.REJECT} | id={mac_add} | images={images} | size={size_val:.2f} | item={id} | volume={vol_val:.1f} | (Unknown brand class 2)\n")
                                 global_emit('command', 0)
                                 detext = False
                                 final_result = 0

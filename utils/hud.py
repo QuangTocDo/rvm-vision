@@ -6,6 +6,11 @@ def draw_premium_hud(display_img, status_text, status_color, smoothed_fps, yolo_
     # Vẽ vùng ROI màu vàng
     cv2.rectangle(display_img, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 255, 255), 2)
     cv2.putText(display_img, "ROI AREA", (roi_x1, roi_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+    # Vẽ vạch ảo màu đỏ ở 1/3 phía dưới ROI làm vạch kích hoạt (Trigger Line) nằm ngang
+    virtual_line_y = roi_y2 - (roi_y2 - roi_y1) // 3
+    cv2.line(display_img, (roi_x1, virtual_line_y), (roi_x2, virtual_line_y), (0, 0, 255), 2, cv2.LINE_AA)
+    cv2.putText(display_img, "TRIGGER LINE", (roi_x1 + 10, virtual_line_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
     
     # Vẽ HUD nền mờ phía trên bên trái
     overlay = display_img.copy()
