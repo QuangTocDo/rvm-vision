@@ -12,11 +12,16 @@ import json
 
 import cv2
 
-S3_BUCKET_NAME = 'rvm-storage'
-S3_ENDPOINT = "https://s3.altacloud.biz:443"
-AWS_PROFILE = 'rvm-profile'
-S3_access_key_id = 'rvm-publish'
-S3_secret_access_key = "&Dfhcj$vRVbaUU2c"
+# ===== S3 CONFIGURATION — Loaded from environment variables =====
+# Set these in your shell or a .env file (see .env.example):
+#   export RVM_S3_BUCKET=rvm-storage
+#   export RVM_S3_ENDPOINT=https://s3.altacloud.biz:443
+#   export RVM_S3_ACCESS_KEY=your-access-key
+#   export RVM_S3_SECRET_KEY=your-secret-key
+S3_BUCKET_NAME   = os.environ.get('RVM_S3_BUCKET',    'rvm-storage')
+S3_ENDPOINT      = os.environ.get('RVM_S3_ENDPOINT',  'https://s3.altacloud.biz:443')
+S3_access_key_id = os.environ.get('RVM_S3_ACCESS_KEY', '')
+S3_secret_access_key = os.environ.get('RVM_S3_SECRET_KEY', '')
 CACHES = []
 DATA_FILES_LOCATION = "./temp/"
 
@@ -120,13 +125,14 @@ def delete_object(Key: str, bucket: str = None):
 
 
 def getDirs(root_dir, regex=".*\.npz"):
-    # files = glob.glob(regex,root_dir=root_dir,recursive=True)
+    if not os.path.isdir(root_dir):
+        return []
     files = os.listdir(root_dir)
-    if files == None or len(files) == 0:
+    if not files:
         return []
     file_list = []
     for file in files:
-        if re.match(regex, regex):
+        if re.match(regex, file):  # FIX: was incorrectly `re.match(regex, regex)`
             file_list.append(file)
     return file_list
 

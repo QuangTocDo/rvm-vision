@@ -1,4 +1,3 @@
-from torch.nn.modules import channelshuffle
 import config
 import math
 def evaluate_hierarchical_class(box, volume_cache, track_cache, roi_coords):

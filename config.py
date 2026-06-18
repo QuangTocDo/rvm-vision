@@ -26,11 +26,11 @@ def get_model_path():
 PROJECT_ROOT = FILE.parents[1]
 
 # ===== PATHS =====
-# WEIGHTS_DIR = PROJECT_ROOT / "best_weights"
-# DATABASE_DIR = PROJECT_ROOT / "best_embeddings"
+WEIGHTS_DIR = PROJECT_ROOT / "best_weights"
+DATABASE_DIR = PROJECT_ROOT / "best_embeddings"
 
-WEIGHTS_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/weights"
-DATABASE_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/database"
+# WEIGHTS_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/weights"
+# DATABASE_DIR = PROJECT_ROOT / "rvm-ai/alta_weights/database"
 
 YOLO_DET_MODEL_ONNX_PATH = WEIGHTS_DIR / "best_13thg5.onnx"
 YOLO_DET_MODEL_PATH  = WEIGHTS_DIR / "best_12thg6.pt"
