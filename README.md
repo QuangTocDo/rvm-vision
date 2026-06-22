@@ -78,7 +78,7 @@ rvm-vision/
 │   ├── __init__.py
 │   └── state_machine.py     # Thread-safe detection lifecycle manager (IDLE, ARMED, DETECTING)
 ├── workers/
-│   ├── inference.py         # Thread worker for YOLOv8 object detection & DeepSORT tracking
+│   ├── inference.py         # Thread worker for YOLO26s object detection & DeepSORT tracking
 │   └── classifier.py        # Thread worker for brand matching & classification models
 ├── utils/
 │   ├── camera_utils.py      # Independent thread for camera I/O and device discovery
