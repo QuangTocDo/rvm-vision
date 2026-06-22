@@ -14,7 +14,7 @@ The pipeline is designed with a **Separation of Concerns (SoC)** approach. Bound
 graph TD
     A["📷 Camera Video Source"] -->|Frame| B["🔄 Main Loop (index.py / index_debug.py)"]
     B -->|Put Frame| C["🧠 InferenceWorker Thread"]
-    C -->|YOLOv8 Det & Track| D["🎯 DeepSORT Tracker"]
+    C -->|YOLO26 Det & Track| D["🎯 DeepSORT Tracker"]
     D -->|Tracked Bounding Boxes| B
     
     B -->|Crop Image & Category| E["🏷️ ClassifierWorker Thread"]
