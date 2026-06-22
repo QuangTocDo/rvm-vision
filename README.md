@@ -51,7 +51,7 @@ graph TD
    - Abort policies for emergency events (e.g., human hand intervention, unidentified bottle brand classification, or out-of-bounds volume detection).
 
 2. **Multithreaded Inference Pipeline**
-   - **`InferenceWorker`**: Runs YOLOv8 object detection (`best_19thg6.pt` or `best_13thg5.onnx`) and updates DeepSORT tracks asynchronously.
+   - **`InferenceWorker`**: Runs YOLO26s object detection (`best_19thg6.pt` or `best_13thg5.onnx`) and updates DeepSORT tracks asynchronously.
    - **`ClassifierWorker`**: Crops tracked objects and runs inference on a Triplet Loss Embedding Network (`mbnv2_embedding19thg3.pth` or `model.onnx`) using Cosine Similarity database matching, or glass classification.
 
 3. **ROI & Virtual Line Engine (`utils/roi.py`)**
